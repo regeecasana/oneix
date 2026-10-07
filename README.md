@@ -172,6 +172,8 @@ Zendesk must be able to reach the API. For local development, expose port 4000 w
 | `npm run db:migrate` | Creates and applies migrations after a schema change |
 | `npm run db:generate` | Regenerates the Prisma client |
 
+The workspace UI is built with [shadcn/ui](https://ui.shadcn.com) (Radix, `radix-nova` style). To add a component, run the CLI from the web app: `cd apps/web && npx shadcn@latest add <component>`. Components land in `apps/web/components/ui`.
+
 To run one app on its own, use its workspace name, for example `npm run dev -w @oneix/api`. Its dependencies must be built first (`npm run build`).
 
 To stop the databases: `docker compose -f infra/docker/docker-compose.yml down`. Add `-v` to also delete their data.
@@ -183,7 +185,7 @@ oneix/
 ├── apps/
 │   ├── api/          NestJS: REST API, auth, per-tenant Zendesk webhooks
 │   ├── worker/       BullMQ: webhook processing, per-tenant backfill and agent sync, tenant CLI
-│   └── web/          Next.js: agent workspace
+│   └── web/          Next.js + shadcn/ui: agent workspace
 ├── packages/
 │   ├── contracts/    Zod schemas and types shared across apps
 │   ├── db/           Prisma schema, migrations, tenant-scoped client, ticket cache writer
