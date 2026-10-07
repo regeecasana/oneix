@@ -3,6 +3,7 @@ import { PrismaClient } from "./generated/prisma/client.js";
 
 export * from "./generated/prisma/client.js";
 export * from "./ticket-cache.js";
+export * from "./tenant-scope.js";
 
 export function createPrismaClient(connectionString: string): PrismaClient {
   return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });

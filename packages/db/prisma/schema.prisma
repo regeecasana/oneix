@@ -39,46 +39,119 @@ enum WebhookSource {
   zendesk
 }
 
+enum ConnectionProvider {
+  zendesk
+}
+
+enum ConnectionAuthType {
+  access_token
+  api_token
+  oauth_client
+}
+
+enum ConnectionStatus {
+  active
+  failing
+  disabled
+}
+
+/// Which tickets an agent may see, mirrored from the backend.
+enum TicketAccess {
+  all
+  groups
+  organization
+  assigned
+  requested
+}
+
 enum WebhookEventStatus {
   pending
   processed
   failed
 }
 
+/// A client of oneix. Each tenant has its own Zendesk instance and agents.
 model Tenant {
   id        String   @id @default(cuid())
+  /// URL-safe name, used in webhook URLs and sign-in.
+  slug      String   @unique
   name      String
   /// Retry rule, business timezone.
   settings  Json     @default("{}")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users         User[]
+  connections   TenantConnection[]
+  memberships   TenantMembership[]
   customers     Customer[]
   tickets       Ticket[]
   webhookEvents WebhookEvent[]
   auditLogs     AuditLog[]
 }
 
-/// Agents and admins of the workspace.
-model User {
-  id            String   @id @default(cuid())
+/// A tenant's connection to a vendor platform. Credentials are encrypted by @oneix/tenancy.
+model TenantConnection {
+  id            String             @id @default(cuid())
   tenantId      String
-  email         String
-  name          String
-  role          UserRole @default(agent)
-  ssoSubject    String?
-  cxoneAgentId  String?
-  zendeskUserId String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  provider      ConnectionProvider
+  /// Zendesk subdomain.
+  subdomain     String
+  authType      ConnectionAuthType
+  /// Encrypted JSON. Shape depends on authType.
+  credentials   String
+  /// Encrypted signing secret of the backend's webhook.
+  webhookSecret String?
+  impersonate   Boolean            @default(false)
+  status        ConnectionStatus   @default(active)
+  lastError     String?
+  lastCheckedAt DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
 
-  tenant          Tenant     @relation(fields: [tenantId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, provider])
+}
+
+/// A person who signs in to oneix. One person can work for several tenants through memberships.
+model User {
+  id         String   @id @default(cuid())
+  email      String   @unique
+  name       String
+  ssoSubject String?  @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  memberships     TenantMembership[]
   assignedTickets Ticket[]
   auditLogs       AuditLog[]
+}
 
-  @@unique([tenantId, email])
+/// A user's access to one tenant, with their identities in that tenant's platforms.
+model TenantMembership {
+  id               String       @id @default(cuid())
+  tenantId         String
+  userId           String
+  role             UserRole     @default(agent)
+  /// Agent in this tenant's Zendesk. Set when agents are provisioned from Zendesk.
+  zendeskUserId    String?
+  cxoneAgentId     String?
+  /// Every role the agent holds in the backend, as it names them: "Light agent", "Moderator".
+  roleNames        String[]     @default([])
+  /// False for agents limited to internal notes, such as Zendesk light agents.
+  canReplyPublicly Boolean      @default(true)
+  ticketAccess     TicketAccess @default(all)
+  /// False when the agent was removed or suspended in the backend.
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, userId])
   @@unique([tenantId, zendeskUserId])
+  @@index([userId])
 }
 
 model Customer {
@@ -143,7 +216,7 @@ model WebhookEvent {
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
-  @@unique([source, eventKey])
+  @@unique([tenantId, source, eventKey])
 }
 
 model AuditLog {

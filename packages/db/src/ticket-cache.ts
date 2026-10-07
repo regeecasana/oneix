@@ -57,9 +57,9 @@ export async function cacheTicketSnapshot(
 
   // Assignees the backend knows but oneix has no user for are cached as unassigned.
   const assignee = snapshot.assigneeExternalId
-    ? await prisma.user.findUnique({
+    ? await prisma.tenantMembership.findUnique({
         where: { tenantId_zendeskUserId: { tenantId, zendeskUserId: snapshot.assigneeExternalId } },
-        select: { id: true },
+        select: { userId: true },
       })
     : null;
 
@@ -69,7 +69,7 @@ export async function cacheTicketSnapshot(
     status: snapshot.status,
     priority: snapshot.priority,
     customerId: customer?.id ?? null,
-    assigneeId: assignee?.id ?? null,
+    assigneeId: assignee?.userId ?? null,
     externalUpdatedAt: snapshot.updatedAt,
     lastSyncedAt: now,
   };

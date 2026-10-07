@@ -13,11 +13,11 @@
     "generate": "prisma generate",
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
-    "typecheck": "prisma generate && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "test": "vitest run",
     "migrate": "prisma migrate dev",
-    "migrate:deploy": "prisma migrate deploy",
-    "seed": "tsx prisma/seed.ts"
+    "migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@oneix/contracts": "*",
@@ -27,7 +27,6 @@
   },
   "devDependencies": {
     "@oneix/config": "*",
-    "prisma": "7.10.0",
-    "tsx": "^4.23.15"
+    "prisma": "7.10.0"
   }
 }
