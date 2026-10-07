@@ -1,9 +1,10 @@
 "use client";
 
-import { TICKET_STATUSES, type TicketStatus } from "@oneix/contracts";
+import { PAGE_SIZES, TICKET_STATUSES, type TicketStatus } from "@oneix/contracts";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PriorityLabel, StatusBadge, statusLabels } from "@/features/tickets/labels";
+import { Pagination } from "@/features/tickets/pagination";
 import { type TicketFilters, useTickets } from "@/features/tickets/queries";
 import { timeAgo } from "@/lib/format";
 
@@ -14,9 +15,23 @@ const assigneeOptions = [
 ];
 
 export default function InboxPage() {
-  const [filters, setFilters] = useState<TicketFilters>({ assignee: "me" });
-  const tickets = useTickets(filters);
-  const rows = tickets.data?.pages.flatMap((page) => page.items) ?? [];
+  const [filters, setFiltersState] = useState<TicketFilters>({ assignee: "me" });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
+  const tickets = useTickets(filters, page, pageSize);
+  const rows = tickets.data?.items ?? [];
+
+  // If the list shrinks (tickets solved elsewhere), don't strand the agent on an empty page.
+  const totalPages = tickets.data?.totalPages;
+  useEffect(() => {
+    if (totalPages !== undefined && page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  // A different filter starts again from the first page.
+  function setFilters(next: TicketFilters) {
+    setFiltersState(next);
+    setPage(1);
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-6">
@@ -101,16 +116,22 @@ export default function InboxPage() {
         )}
       </div>
 
-      {tickets.hasNextPage && (
-        <div className="mt-4 text-center">
-          <button
-            type="button"
-            onClick={() => void tickets.fetchNextPage()}
-            disabled={tickets.isFetchingNextPage}
-            className="rounded-md border border-zinc-300 bg-white px-4 py-1.5 text-sm hover:bg-zinc-50 disabled:opacity-50"
-          >
-            {tickets.isFetchingNextPage ? "Loading…" : "Load more"}
-          </button>
+      {tickets.data && tickets.data.total > 0 && (
+        <div className={`mt-4 ${tickets.isPlaceholderData ? "opacity-60" : ""}`}>
+          <Pagination
+            page={tickets.data.page}
+            pageSize={tickets.data.pageSize}
+            total={tickets.data.total}
+            totalPages={tickets.data.totalPages}
+            onPageChange={(next) => {
+              setPage(next);
+              window.scrollTo({ top: 0 });
+            }}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
         </div>
       )}
     </div>

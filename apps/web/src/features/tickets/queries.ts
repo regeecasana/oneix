@@ -7,7 +7,7 @@ import type {
   TicketSummary,
   UpdateTicketRequest,
 } from "@oneix/contracts";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 export interface TicketFilters {
@@ -16,18 +16,17 @@ export interface TicketFilters {
   assignee?: string;
 }
 
-export function useTickets(filters: TicketFilters) {
-  return useInfiniteQuery({
-    queryKey: ["tickets", filters],
-    queryFn: ({ pageParam }) => {
-      const params = new URLSearchParams();
+export function useTickets(filters: TicketFilters, page: number, pageSize: number) {
+  return useQuery({
+    queryKey: ["tickets", filters, page, pageSize],
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (filters.status) params.set("status", filters.status);
       if (filters.assignee) params.set("assignee", filters.assignee);
-      if (pageParam) params.set("cursor", pageParam);
       return api<ListTicketsResponse>(`/tickets?${params}`);
     },
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    // Keeps the current page on screen while the next one loads.
+    placeholderData: keepPreviousData,
     refetchInterval: 30_000,
   });
 }

@@ -61,8 +61,8 @@ export const ListTicketsQuery = z.object({
   status: TicketStatus.optional(),
   /** `me`, `unassigned`, or a user ID. Omit for all tickets. */
   assignee: z.string().min(1).optional(),
-  cursor: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(25),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
 export type ListTicketsQuery = z.input<typeof ListTicketsQuery>;
 

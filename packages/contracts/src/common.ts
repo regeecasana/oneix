@@ -1,9 +1,15 @@
 import { z } from "zod";
 
+export const PAGE_SIZES = [25, 50, 100] as const;
+
+/** One page of a list. `page` is 1-based. */
 export const paginated = <T extends z.ZodType>(item: T) =>
   z.object({
     items: z.array(item),
-    nextCursor: z.string().nullable(),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+    total: z.number().int(),
+    totalPages: z.number().int(),
   });
 
 export const ApiError = z.object({

@@ -11,7 +11,6 @@ import { cacheTicketSnapshot, type Prisma, type PrismaClient } from "@oneix/db";
 import type { Actor, TicketChanges, TicketingProvider } from "@oneix/ticketing";
 import type { z } from "zod";
 import type { SessionUser } from "../../common/auth.js";
-import { decodeCursor, encodeCursor } from "../../common/cursor.js";
 import { PRISMA, TICKETING } from "../../common/providers.module.js";
 import { AuditService } from "../audit/audit.service.js";
 import { type TicketRow, ticketInclude, toThreadEntry, toTicketSummary } from "./tickets.mapper.js";
@@ -26,7 +25,7 @@ export class TicketsService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Inbox list, served from the cache. */
+  /** Inbox list, served from the cache, one page at a time, newest activity first. */
   async list(user: SessionUser, query: ListQuery): Promise<ListTicketsResponse> {
     const where: Prisma.TicketWhereInput = { tenantId: user.tenantId };
     if (query.status) where.status = query.status;
@@ -34,27 +33,23 @@ export class TicketsService {
     else if (query.assignee === "unassigned") where.assigneeId = null;
     else if (query.assignee) where.assigneeId = query.assignee;
 
-    if (query.cursor) {
-      const { updatedAt, id } = decodeCursor(query.cursor);
-      where.OR = [
-        { externalUpdatedAt: { lt: updatedAt } },
-        { externalUpdatedAt: updatedAt, id: { lt: id } },
-      ];
-    }
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.ticket.count({ where }),
+      this.prisma.ticket.findMany({
+        where,
+        include: ticketInclude,
+        orderBy: [{ externalUpdatedAt: "desc" }, { id: "desc" }],
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+    ]);
 
-    const rows = await this.prisma.ticket.findMany({
-      where,
-      include: ticketInclude,
-      orderBy: [{ externalUpdatedAt: "desc" }, { id: "desc" }],
-      take: query.limit + 1,
-    });
-
-    const page = rows.slice(0, query.limit);
-    const last = page.at(-1);
     return {
-      items: page.map(toTicketSummary),
-      nextCursor:
-        rows.length > query.limit && last ? encodeCursor({ updatedAt: last.externalUpdatedAt, id: last.id }) : null,
+      items: rows.map(toTicketSummary),
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
     };
   }
 
