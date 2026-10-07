@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { StatusBadge } from "@/features/tickets/labels";
-import { NoteComposer } from "@/features/tickets/note-composer";
+import { CommentComposer } from "@/features/tickets/comment-composer";
 import { useTicket } from "@/features/tickets/queries";
 import { Thread } from "@/features/tickets/thread";
 import { TicketProperties } from "@/features/tickets/ticket-properties";
@@ -35,7 +35,7 @@ export default function TicketPage() {
           <div className="grid gap-6 lg:grid-cols-[1fr_18rem]">
             <section className="min-w-0 space-y-6">
               <Thread entries={ticket.data.thread} />
-              {ticket.data.status !== "closed" && <NoteComposer ticketId={ticket.data.id} />}
+              {ticket.data.status !== "closed" && <CommentComposer ticket={ticket.data} />}
             </section>
             <TicketProperties ticket={ticket.data} />
           </div>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { useLogout, useMe } from "@/features/auth/queries";
+import { useLogout, useMe, useSwitchTenant } from "@/features/auth/queries";
 
 const nav = [{ href: "/inbox", label: "Inbox" }];
 
@@ -11,6 +11,7 @@ const nav = [{ href: "/inbox", label: "Inbox" }];
 export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   const me = useMe();
   const logout = useLogout();
+  const switchTenant = useSwitchTenant();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -29,6 +30,30 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
           <Link href="/inbox" className="text-base font-semibold tracking-tight">
             oneix
           </Link>
+          {/* The client workspace the agent is in. Agents serving several clients switch here. */}
+          {me.data.tenants.length > 1 ? (
+            <label className="text-sm">
+              <span className="sr-only">Client workspace</span>
+              <select
+                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm font-medium"
+                value={me.data.tenant.slug}
+                disabled={switchTenant.isPending}
+                onChange={(e) =>
+                  switchTenant.mutate(e.target.value, { onSuccess: () => router.replace("/inbox") })
+                }
+              >
+                {me.data.tenants.map((t) => (
+                  <option key={t.slug} value={t.slug}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <span className="rounded-md bg-zinc-100 px-2 py-1 text-sm font-medium text-zinc-700">
+              {me.data.tenant.name}
+            </span>
+          )}
           <nav className="flex gap-1">
             {nav.map((item) => {
               const active = pathname.startsWith(item.href) || (item.href === "/inbox" && pathname.startsWith("/tickets"));

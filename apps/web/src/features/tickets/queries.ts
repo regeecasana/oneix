@@ -1,5 +1,5 @@
 import type {
-  AddNoteRequest,
+  AddCommentRequest,
   ListAgentsResponse,
   ListTicketsResponse,
   TicketDetail,
@@ -55,10 +55,14 @@ export function useUpdateTicket(id: string) {
   });
 }
 
-export function useAddNote(id: string) {
+export function useAddComment(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (note: AddNoteRequest) => api<void>(`/tickets/${id}/notes`, { method: "POST", body: note }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ticket", id] }),
+    mutationFn: (comment: AddCommentRequest) =>
+      api<TicketSummary>(`/tickets/${id}/comments`, { method: "POST", body: comment }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+      void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    },
   });
 }
