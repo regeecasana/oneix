@@ -18,6 +18,9 @@
     "@oneix/web#typecheck": {
       "dependsOn": ["^build", "build"]
     },
+    "@oneix/db#typecheck": {
+      "dependsOn": ["build"]
+    },
     "lint": {
       "dependsOn": ["^build"]
     },
