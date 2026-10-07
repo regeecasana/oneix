@@ -52,7 +52,29 @@ Sign-in is a development stub: you pick a seeded agent from a list. SSO replaces
 
 ## Getting started
 
-Run everything from the repo root.
+### Quick start: one command
+
+```bash
+npm start
+```
+
+That's it. On the first run it creates `.env` from `.env.example` and stops, so you can fill in the Zendesk values (see [Connecting Zendesk](#connecting-zendesk)). Run `npm start` again and it:
+
+1. checks that Docker is running and starts PostgreSQL and Redis,
+2. installs dependencies if `node_modules` is missing,
+3. applies database migrations,
+4. seeds the tenant and agents,
+5. runs api, worker, and web in watch mode.
+
+Every step is safe to repeat, so use the same command every time. Stop with Ctrl+C. The database containers keep running in the background; see [Everyday commands](#everyday-commands) to stop them.
+
+Then open http://localhost:3000 and pick an agent.
+
+> Variables already set in your shell take precedence over `.env`. If a value seems ignored, check your system environment variables.
+
+### Step by step
+
+The same steps, run by hand. Useful when one of them fails. Run everything from the repo root.
 
 **1. Install dependencies**
 
@@ -80,7 +102,7 @@ docker compose -f infra/docker/docker-compose.yml up -d
 npm run db:migrate
 ```
 
-The first run asks for a migration name (use `init`) and creates the initial migration in `packages/db/prisma/migrations`. Later runs apply new migrations.
+This applies the migrations in `packages/db/prisma/migrations`. After you change `schema.prisma`, the same command asks for a name and creates a new migration.
 
 **5. Seed the tenant and agents**
 
@@ -108,11 +130,17 @@ oneix needs three things from Zendesk. All of them are set up in Zendesk Admin C
 
 ### 1. API access
 
-Create an OAuth client under **Apps and integrations → APIs → OAuth Clients**, then set `ZENDESK_CLIENT_ID` and `ZENDESK_CLIENT_SECRET`. oneix requests tokens with the client credentials grant.
+Set one of these in `.env`. If several are set, the first one in this table wins.
 
-If your client cannot use that grant, issue an access token for it and set `ZENDESK_ACCESS_TOKEN` instead. A token set there takes precedence over the client credentials.
+| Method | Variables | Notes |
+|---|---|---|
+| OAuth access token | `ZENDESK_ACCESS_TOKEN` | A token you issued in advance |
+| API token (simplest) | `ZENDESK_EMAIL`, `ZENDESK_API_TOKEN` | Create under **Apps and integrations → APIs → Zendesk API**. Cannot impersonate agents |
+| OAuth client | `ZENDESK_CLIENT_ID`, `ZENDESK_CLIENT_SECRET` | Create under **Apps and integrations → APIs → OAuth Clients**. oneix requests tokens with the client credentials grant, so the client must allow it |
 
-The token's user should be an admin, because the backfill uses Zendesk's incremental export.
+The user behind the credentials should be an admin, because the backfill uses Zendesk's incremental export.
+
+If the inbox stays empty, check the worker logs for a 401 from Zendesk. That means the credentials were rejected.
 
 ### 2. Agent attribution
 
@@ -121,7 +149,7 @@ Notes and ticket changes should show the agent who made them, not the API user. 
 | Value | How it works | Requirement |
 |---|---|---|
 | `false` (default) | Notes are attributed to the agent's Zendesk user ID | The agent has a `zendeskUserId` mapping |
-| `true` | Every request is sent on behalf of the agent | Token has the `impersonate` scope, and the agent's oneix email matches their Zendesk email |
+| `true` | Every request is sent on behalf of the agent | OAuth only: the token has the `impersonate` scope, and the agent's oneix email matches their Zendesk email |
 
 ### 3. Map agents to Zendesk
 
@@ -158,7 +186,8 @@ Zendesk must be able to reach the API. For local development, expose port 4000 w
 
 | Command | Does |
 |---|---|
-| `npm run dev` | Runs api, worker, and web in watch mode |
+| `npm start` | Sets up everything that's missing, then runs the apps (see [Quick start](#quick-start-one-command)) |
+| `npm run dev` | Runs api, worker, and web in watch mode, assuming setup is done |
 | `npm run build` | Builds every package and app |
 | `npm run typecheck` | Type-checks the workspace |
 | `npm run lint` | Lints the workspace |
@@ -187,6 +216,7 @@ oneix/
 │   ├── logger/       Structured logging (pino)
 │   └── config/       Shared ESLint and Prettier config
 ├── infra/docker/     Local PostgreSQL and Redis
+├── scripts/          start.mjs, behind npm start
 └── docs/             Planning and design documents
 ```
 
@@ -224,7 +254,7 @@ Zendesk credentials are never given to the web app.
 | api or worker exits with `Invalid ... configuration` | A required variable is missing from `.env`. The message names it. |
 | Login page says sign-in is unavailable | The api is not running, or `AUTH_DEV_LOGIN` is not `true`. |
 | Login page lists no agents | Run `npm run db:seed`. |
-| Inbox stays empty | The worker is not running, or the Zendesk credentials are wrong. Check the worker logs. |
+| Inbox stays empty | The worker is not running, the Zendesk credentials are wrong, or the filter is "Assigned to me" and your agent has no `zendeskUserId`. Check the worker logs, or switch the filter to "Everyone". |
 | "The ticket service is unavailable" | A Zendesk call failed. The api logs show the cause. |
 | "This agent isn't set up to receive tickets yet" | The agent has no `zendeskUserId`. See [Map agents to Zendesk](#3-map-agents-to-zendesk). |
 | Webhook calls return 401 | `ZENDESK_WEBHOOK_SECRET` does not match the webhook's signing secret. |
