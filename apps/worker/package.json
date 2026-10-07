@@ -1,0 +1,25 @@
+{
+  "name": "@oneix/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json && concurrently -k -n tsc,worker \"tsc -p tsconfig.build.json --watch --preserveWatchOutput\" \"node --enable-source-maps --watch --env-file-if-exists=../../.env dist/main.js\"",
+    "start": "node --enable-source-maps --env-file-if-exists=../../.env dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@oneix/contracts": "*",
+    "@oneix/db": "*",
+    "@oneix/logger": "*",
+    "@oneix/ticketing": "*",
+    "bullmq": "^6.3.11",
+    "ioredis": "^5.11.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@oneix/config": "*"
+  }
+}
