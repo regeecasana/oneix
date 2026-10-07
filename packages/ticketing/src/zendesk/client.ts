@@ -4,9 +4,11 @@ export interface ZendeskClientConfig {
   subdomain: string;
   clientId?: string;
   clientSecret?: string;
-  /** Pre-issued OAuth access token. When set, the client credentials grant is skipped. */
+  /** Pre-issued OAuth access token. Takes precedence over every other method. */
   accessToken?: string;
-  /** Send agent actions with X-On-Behalf-Of. The token needs the `impersonate` scope. */
+  /** Zendesk API token of an admin, used with Basic auth. Takes precedence over the OAuth client. */
+  apiToken?: { email: string; token: string };
+  /** Send agent actions with X-On-Behalf-Of. OAuth only; the token needs the `impersonate` scope. */
   impersonate: boolean;
   fetch?: typeof fetch;
 }
@@ -21,7 +23,11 @@ export interface RequestOptions {
 const MAX_RATE_LIMIT_WAIT_MS = 10_000;
 const TOKEN_REFRESH_MARGIN_MS = 60_000;
 
-/** Thin HTTP client for the Zendesk REST API with OAuth and rate-limit handling. */
+/**
+ * Thin HTTP client for the Zendesk REST API with authentication and rate-limit handling.
+ * Authenticates with, in order of preference: a pre-issued OAuth token, an API token,
+ * or the OAuth client credentials grant.
+ */
 export class ZendeskClient {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
@@ -30,13 +36,22 @@ export class ZendeskClient {
   constructor(private readonly config: ZendeskClientConfig) {
     this.baseUrl = `https://${config.subdomain}.zendesk.com`;
     this.fetchFn = config.fetch ?? fetch;
-    if (!config.accessToken && !(config.clientId && config.clientSecret)) {
-      throw new Error("Ticketing backend needs either an access token or a client ID and secret");
+    if (!config.accessToken && !config.apiToken && !(config.clientId && config.clientSecret)) {
+      throw new Error("Ticketing backend needs an access token, an API token, or a client ID and secret");
     }
   }
 
+  /** Impersonation needs OAuth, so it is off when authenticating with an API token. */
   get impersonationEnabled(): boolean {
-    return this.config.impersonate;
+    return this.config.impersonate && !this.usesApiToken;
+  }
+
+  private get usesApiToken(): boolean {
+    return !this.config.accessToken && this.config.apiToken !== undefined;
+  }
+
+  private get usesClientCredentials(): boolean {
+    return !this.config.accessToken && !this.config.apiToken;
   }
 
   async request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
@@ -47,11 +62,11 @@ export class ZendeskClient {
 
     for (let attempt = 0; ; attempt++) {
       const headers: Record<string, string> = {
-        Authorization: `Bearer ${await this.accessToken()}`,
+        Authorization: await this.authorization(),
         Accept: "application/json",
       };
       if (options.body !== undefined) headers["Content-Type"] = "application/json";
-      if (options.onBehalfOf && this.config.impersonate) headers["X-On-Behalf-Of"] = options.onBehalfOf;
+      if (options.onBehalfOf && this.impersonationEnabled) headers["X-On-Behalf-Of"] = options.onBehalfOf;
 
       let response: Response;
       try {
@@ -69,7 +84,7 @@ export class ZendeskClient {
       }
 
       // A rejected token is dropped and fetched again once.
-      if (response.status === 401 && attempt === 0 && !this.config.accessToken) {
+      if (response.status === 401 && attempt === 0 && this.usesClientCredentials) {
         this.token = null;
         continue;
       }
@@ -92,8 +107,16 @@ export class ZendeskClient {
     }
   }
 
-  private async accessToken(): Promise<string> {
-    if (this.config.accessToken) return this.config.accessToken;
+  private async authorization(): Promise<string> {
+    if (this.config.accessToken) return `Bearer ${this.config.accessToken}`;
+    if (this.config.apiToken) {
+      const { email, token } = this.config.apiToken;
+      return `Basic ${Buffer.from(`${email}/token:${token}`).toString("base64")}`;
+    }
+    return `Bearer ${await this.clientCredentialsToken()}`;
+  }
+
+  private async clientCredentialsToken(): Promise<string> {
     if (this.token && this.token.expiresAt - TOKEN_REFRESH_MARGIN_MS > Date.now()) return this.token.value;
 
     const scope = this.config.impersonate ? "read write impersonate" : "read write";

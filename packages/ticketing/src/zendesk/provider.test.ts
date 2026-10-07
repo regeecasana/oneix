@@ -189,6 +189,23 @@ describe("ZendeskProvider", () => {
     expect(error).toMatchObject({ status: 429, retryable: true, retryAfterMs: 60_000 });
   });
 
+  it("authenticates with an API token and never impersonates", async () => {
+    const fake = fakeFetch({ "PUT /api/v2/tickets/1001.json": () => json({ ticket }) });
+    const zendesk = new ZendeskProvider({
+      subdomain: "acme",
+      apiToken: { email: "admin@acme.com", token: "abc" },
+      impersonate: true,
+      fetch: fake.fetch,
+    });
+
+    await zendesk.addNote("1001", { body: "Note" }, { email: "sam@oneix.local", externalUserId: "20" });
+
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]?.headers.Authorization).toBe(`Basic ${Buffer.from("admin@acme.com/token:abc").toString("base64")}`);
+    expect(fake.calls[0]?.headers["X-On-Behalf-Of"]).toBeUndefined();
+    expect(fake.calls[0]?.body).toEqual({ ticket: { comment: { body: "Note", public: false, author_id: 20 } } });
+  });
+
   it("refreshes the token once when it is rejected", async () => {
     let tokenCalls = 0;
     let ticketCalls = 0;

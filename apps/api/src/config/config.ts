@@ -15,12 +15,21 @@ const schema = z
     ZENDESK_CLIENT_ID: z.string().optional(),
     ZENDESK_CLIENT_SECRET: z.string().optional(),
     ZENDESK_ACCESS_TOKEN: z.string().optional(),
+    ZENDESK_EMAIL: z.string().optional(),
+    ZENDESK_API_TOKEN: z.string().optional(),
     ZENDESK_IMPERSONATE: z.stringbool().default(false),
     ZENDESK_WEBHOOK_SECRET: z.string().optional(),
   })
-  .refine((c) => c.ZENDESK_ACCESS_TOKEN || (c.ZENDESK_CLIENT_ID && c.ZENDESK_CLIENT_SECRET), {
-    message: "Set ZENDESK_ACCESS_TOKEN, or both ZENDESK_CLIENT_ID and ZENDESK_CLIENT_SECRET",
-  })
+  .refine(
+    (c) =>
+      c.ZENDESK_ACCESS_TOKEN ||
+      (c.ZENDESK_EMAIL && c.ZENDESK_API_TOKEN) ||
+      (c.ZENDESK_CLIENT_ID && c.ZENDESK_CLIENT_SECRET),
+    {
+      message:
+        "Set ZENDESK_ACCESS_TOKEN, ZENDESK_EMAIL with ZENDESK_API_TOKEN, or ZENDESK_CLIENT_ID with ZENDESK_CLIENT_SECRET",
+    },
+  )
   .refine((c) => !(c.NODE_ENV === "production" && c.AUTH_DEV_LOGIN), {
     message: "AUTH_DEV_LOGIN must be off in production",
   });

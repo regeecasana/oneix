@@ -28,6 +28,10 @@ export const WEBHOOK_QUEUE = Symbol("WEBHOOK_QUEUE");
           clientId: config.ZENDESK_CLIENT_ID,
           clientSecret: config.ZENDESK_CLIENT_SECRET,
           accessToken: config.ZENDESK_ACCESS_TOKEN,
+          apiToken:
+            config.ZENDESK_EMAIL && config.ZENDESK_API_TOKEN
+              ? { email: config.ZENDESK_EMAIL, token: config.ZENDESK_API_TOKEN }
+              : undefined,
           impersonate: config.ZENDESK_IMPERSONATE,
         }),
     },
