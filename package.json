@@ -20,7 +20,7 @@
     "format": "prettier --write .",
     "db:generate": "npm run generate -w @oneix/db",
     "db:migrate": "npm run migrate -w @oneix/db",
-    "db:seed": "npm run seed -w @oneix/db"
+    "tenant": "node --env-file-if-exists=.env apps/worker/dist/cli/tenant.js"
   },
   "prettier": "@oneix/config/prettier",
   "devDependencies": {
