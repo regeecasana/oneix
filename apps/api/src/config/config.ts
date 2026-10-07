@@ -5,31 +5,14 @@ const schema = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     API_PORT: z.coerce.number().int().default(4000),
     WEB_ORIGIN: z.url().default("http://localhost:3000"),
-    TENANT_ID: z.string().min(1).default("default"),
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
     SESSION_SECRET: z.string().min(32),
     AUTH_DEV_LOGIN: z.stringbool().default(false),
 
-    ZENDESK_SUBDOMAIN: z.string().min(1),
-    ZENDESK_CLIENT_ID: z.string().optional(),
-    ZENDESK_CLIENT_SECRET: z.string().optional(),
-    ZENDESK_ACCESS_TOKEN: z.string().optional(),
-    ZENDESK_EMAIL: z.string().optional(),
-    ZENDESK_API_TOKEN: z.string().optional(),
-    ZENDESK_IMPERSONATE: z.stringbool().default(false),
-    ZENDESK_WEBHOOK_SECRET: z.string().optional(),
+    /** Encrypts tenant credentials at rest. 32 bytes, base64. */
+    ONEIX_ENCRYPTION_KEY: z.string().min(1),
   })
-  .refine(
-    (c) =>
-      c.ZENDESK_ACCESS_TOKEN ||
-      (c.ZENDESK_EMAIL && c.ZENDESK_API_TOKEN) ||
-      (c.ZENDESK_CLIENT_ID && c.ZENDESK_CLIENT_SECRET),
-    {
-      message:
-        "Set ZENDESK_ACCESS_TOKEN, ZENDESK_EMAIL with ZENDESK_API_TOKEN, or ZENDESK_CLIENT_ID with ZENDESK_CLIENT_SECRET",
-    },
-  )
   .refine((c) => !(c.NODE_ENV === "production" && c.AUTH_DEV_LOGIN), {
     message: "AUTH_DEV_LOGIN must be off in production",
   });

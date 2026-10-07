@@ -1,15 +1,16 @@
 import { Global, Inject, Module, type OnApplicationShutdown } from "@nestjs/common";
 import { QUEUES, redisConnectionFromUrl } from "@oneix/contracts";
 import { createPrismaClient, type PrismaClient } from "@oneix/db";
-import { type TicketingProvider, ZendeskProvider } from "@oneix/ticketing";
+import { SecretBox, TicketingRegistry } from "@oneix/tenancy";
 import { Queue } from "bullmq";
 import { APP_CONFIG, type AppConfig, loadConfig } from "../config/config.js";
 
 export const PRISMA = Symbol("PRISMA");
+/** TicketingRegistry: the ticketing client for any tenant. */
 export const TICKETING = Symbol("TICKETING");
 export const WEBHOOK_QUEUE = Symbol("WEBHOOK_QUEUE");
 
-/** Config, database, ticketing backend, and queues, available to every module. */
+/** Config, database, per-tenant ticketing clients, and queues, available to every module. */
 @Global()
 @Module({
   providers: [
@@ -21,19 +22,9 @@ export const WEBHOOK_QUEUE = Symbol("WEBHOOK_QUEUE");
     },
     {
       provide: TICKETING,
-      inject: [APP_CONFIG],
-      useFactory: (config: AppConfig): TicketingProvider =>
-        new ZendeskProvider({
-          subdomain: config.ZENDESK_SUBDOMAIN,
-          clientId: config.ZENDESK_CLIENT_ID,
-          clientSecret: config.ZENDESK_CLIENT_SECRET,
-          accessToken: config.ZENDESK_ACCESS_TOKEN,
-          apiToken:
-            config.ZENDESK_EMAIL && config.ZENDESK_API_TOKEN
-              ? { email: config.ZENDESK_EMAIL, token: config.ZENDESK_API_TOKEN }
-              : undefined,
-          impersonate: config.ZENDESK_IMPERSONATE,
-        }),
+      inject: [APP_CONFIG, PRISMA],
+      useFactory: (config: AppConfig, prisma: PrismaClient) =>
+        new TicketingRegistry(prisma, new SecretBox(config.ONEIX_ENCRYPTION_KEY)),
     },
     {
       provide: WEBHOOK_QUEUE,

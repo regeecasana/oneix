@@ -78,7 +78,11 @@ export const UpdateTicketRequest = z
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "No changes given" });
 export type UpdateTicketRequest = z.infer<typeof UpdateTicketRequest>;
 
-export const AddNoteRequest = z.object({
-  body: z.string().trim().min(1).max(20_000),
+export const AddCommentRequest = z.object({
+  body: z.string().trim().min(1).max(64_000),
+  /** True: a reply the customer receives. False: an internal note for agents only. */
+  public: z.boolean(),
+  /** Changes the status in the same update, like "Submit as Pending". */
+  status: SettableTicketStatus.optional(),
 });
-export type AddNoteRequest = z.infer<typeof AddNoteRequest>;
+export type AddCommentRequest = z.infer<typeof AddCommentRequest>;

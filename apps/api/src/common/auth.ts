@@ -14,14 +14,17 @@ import { APP_CONFIG, type AppConfig } from "../config/config.js";
 import { PRISMA } from "./providers.module.js";
 import { SESSION_COOKIE, verifySession } from "./session.js";
 
-/** The signed-in agent, attached to every authenticated request. */
+/** The signed-in agent and the tenant they are working in, attached to every authenticated request. */
 export interface SessionUser {
   id: string;
-  tenantId: string;
   email: string;
   name: string;
+  tenantId: string;
+  /** Role in this tenant. */
   role: UserRole;
+  /** The agent's user ID in this tenant's ticketing backend. */
   zendeskUserId: string | null;
+  canReplyPublicly: boolean;
 }
 
 type AuthedRequest = Request & { sessionUser?: SessionUser };
@@ -57,13 +60,28 @@ export class AuthGuard implements CanActivate {
     const session = typeof token === "string" ? verifySession(token, this.config.SESSION_SECRET) : null;
     if (!session) throw new UnauthorizedException();
 
-    const user = await this.prisma.user.findFirst({
-      where: { id: session.sub, tenantId: session.tid },
-      select: { id: true, tenantId: true, email: true, name: true, role: true, zendeskUserId: true },
+    // Access is re-checked on every request, so removing an agent in the backend takes effect at once.
+    const membership = await this.prisma.tenantMembership.findUnique({
+      where: { tenantId_userId: { tenantId: session.tid, userId: session.sub } },
+      select: {
+        role: true,
+        zendeskUserId: true,
+        canReplyPublicly: true,
+        active: true,
+        user: { select: { email: true, name: true } },
+      },
     });
-    if (!user) throw new UnauthorizedException();
+    if (!membership?.active) throw new UnauthorizedException();
 
-    request.sessionUser = user;
+    request.sessionUser = {
+      id: session.sub,
+      email: membership.user.email,
+      name: membership.user.name,
+      tenantId: session.tid,
+      role: membership.role,
+      zendeskUserId: membership.zendeskUserId,
+      canReplyPublicly: membership.canReplyPublicly,
+    };
     return true;
   }
 }

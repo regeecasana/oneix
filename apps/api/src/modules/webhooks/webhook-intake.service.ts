@@ -4,11 +4,11 @@ import { isUniqueViolation, type Prisma, type PrismaClient, type WebhookSource }
 import { createLogger } from "@oneix/logger";
 import type { Queue } from "bullmq";
 import { PRISMA, WEBHOOK_QUEUE } from "../../common/providers.module.js";
-import { APP_CONFIG, type AppConfig } from "../../config/config.js";
 
 const logger = createLogger("api.webhooks");
 
 export interface IncomingWebhook {
+  tenantId: string;
   source: WebhookSource;
   eventKey: string;
   payload: Prisma.InputJsonValue;
@@ -21,7 +21,6 @@ export interface IncomingWebhook {
 @Injectable()
 export class WebhookIntakeService {
   constructor(
-    @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     @Inject(WEBHOOK_QUEUE) private readonly queue: Queue<WebhookJob>,
   ) {}
@@ -30,7 +29,7 @@ export class WebhookIntakeService {
     let eventId: string;
     try {
       const event = await this.prisma.webhookEvent.create({
-        data: { tenantId: this.config.TENANT_ID, ...webhook },
+        data: webhook,
         select: { id: true },
       });
       eventId = event.id;

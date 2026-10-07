@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import {
-  AddNoteRequest,
+  AddCommentRequest,
   ListTicketsQuery,
   type ListTicketsResponse,
   type TicketDetail,
@@ -38,13 +38,13 @@ export class TicketsController {
     return this.tickets.update(user, id, body);
   }
 
-  @Post(":id/notes")
-  @HttpCode(204)
-  addNote(
+  /** Public reply or internal note, optionally changing the status. */
+  @Post(":id/comments")
+  addComment(
     @CurrentUser() user: SessionUser,
     @Param("id") id: string,
-    @Body(new ZodPipe(AddNoteRequest)) body: AddNoteRequest,
-  ): Promise<void> {
-    return this.tickets.addNote(user, id, body);
+    @Body(new ZodPipe(AddCommentRequest)) body: AddCommentRequest,
+  ): Promise<TicketSummary> {
+    return this.tickets.addComment(user, id, body);
   }
 }

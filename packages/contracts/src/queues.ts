@@ -11,6 +11,9 @@ export interface WebhookJob {
 export const TICKET_SYNC_JOBS = {
   one: "sync-one",
   backfill: "backfill",
+  agents: "sync-agents",
+  /** Repeating job that enqueues `backfill` or `agents` for every connected tenant. */
+  fanOut: "fan-out",
 } as const;
 
 export interface TicketSyncOneJob {
@@ -20,6 +23,14 @@ export interface TicketSyncOneJob {
 
 export interface TicketBackfillJob {
   tenantId: string;
+}
+
+export interface AgentSyncJob {
+  tenantId: string;
+}
+
+export interface FanOutJob {
+  job: typeof TICKET_SYNC_JOBS.backfill | typeof TICKET_SYNC_JOBS.agents;
 }
 
 /** BullMQ connection options from a redis:// or rediss:// URL. */

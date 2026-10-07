@@ -18,6 +18,7 @@
     "@oneix/contracts": "*",
     "@oneix/db": "*",
     "@oneix/logger": "*",
+    "@oneix/tenancy": "*",
     "@oneix/ticketing": "*",
     "bullmq": "^6.3.11",
     "cookie-parser": "^1.4.7",
