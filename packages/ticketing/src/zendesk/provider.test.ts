@@ -47,9 +47,11 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 const tokenRoute = { "POST /oauth/tokens": () => json({ access_token: "tok", expires_in: 3600 }) };
+const usersRoute = { "GET /api/v2/users/show_many.json": () => json({ users: [customer] }) };
+const putOf = (calls: Call[]) => calls.find((c) => c.method === "PUT");
 
 function provider(routes: Record<string, (call: Call) => Response>, impersonate = false) {
-  const fake = fakeFetch({ ...tokenRoute, ...routes });
+  const fake = fakeFetch({ ...tokenRoute, ...usersRoute, ...routes });
   const zendesk = new ZendeskProvider({
     subdomain: "acme",
     clientId: "id",
@@ -114,23 +116,43 @@ describe("ZendeskProvider", () => {
   });
 
   it("attributes notes through author_id without impersonation", async () => {
-    const { zendesk, calls } = provider({ "PUT /api/v2/tickets/1001.json": () => json({ ticket }) });
+    const { zendesk, calls } = provider({ "PUT /api/v2/tickets/1001.json": () => json({ ticket, users: [customer] }) });
 
-    await zendesk.addNote("1001", { body: "Called the customer" }, { email: "sam@oneix.local", externalUserId: "20" });
+    await zendesk.addComment("1001", { body: "Called the customer", public: false }, { email: "sam@oneix.local", externalUserId: "20" });
 
-    expect(calls.at(-1)?.body).toEqual({
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
       ticket: { comment: { body: "Called the customer", public: false, author_id: 20 } },
     });
+  });
+
+  it("sends a public reply and changes the status in one update", async () => {
+    const { zendesk, calls } = provider({
+      "PUT /api/v2/tickets/1001.json": () => json({ ticket: { ...ticket, status: "pending" } }),
+      "GET /api/v2/users/show_many.json": () => json({ users: [customer] }),
+    });
+
+    const result = await zendesk.addComment(
+      "1001",
+      { body: "We've fixed your invoice.", public: true, status: "pending" },
+      { email: "sam@oneix.local", externalUserId: "20" },
+    );
+
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts).toHaveLength(1);
+    expect(puts[0]?.body).toEqual({
+      ticket: { comment: { body: "We've fixed your invoice.", public: true, author_id: 20 }, status: "pending" },
+    });
+    expect(result.status).toBe("pending");
   });
 
   it("acts on behalf of the agent when impersonation is enabled", async () => {
     const { zendesk, calls } = provider({ "PUT /api/v2/tickets/1001.json": () => json({ ticket }) }, true);
 
-    await zendesk.addNote("1001", { body: "Note" }, { email: "sam@oneix.local", externalUserId: "20" });
+    await zendesk.addComment("1001", { body: "Note", public: false }, { email: "sam@oneix.local", externalUserId: "20" });
 
     expect(calls[0]?.body).toMatchObject({ scope: "read write impersonate" });
-    expect(calls.at(-1)?.headers["X-On-Behalf-Of"]).toBe("sam@oneix.local");
-    expect(calls.at(-1)?.body).toEqual({ ticket: { comment: { body: "Note", public: false } } });
+    expect(putOf(calls)?.headers["X-On-Behalf-Of"]).toBe("sam@oneix.local");
+    expect(putOf(calls)?.body).toEqual({ ticket: { comment: { body: "Note", public: false } } });
   });
 
   it("reads every page of the thread and labels authors", async () => {
@@ -190,7 +212,7 @@ describe("ZendeskProvider", () => {
   });
 
   it("authenticates with an API token and never impersonates", async () => {
-    const fake = fakeFetch({ "PUT /api/v2/tickets/1001.json": () => json({ ticket }) });
+    const fake = fakeFetch({ ...usersRoute, "PUT /api/v2/tickets/1001.json": () => json({ ticket }) });
     const zendesk = new ZendeskProvider({
       subdomain: "acme",
       apiToken: { email: "admin@acme.com", token: "abc" },
@@ -198,12 +220,72 @@ describe("ZendeskProvider", () => {
       fetch: fake.fetch,
     });
 
-    await zendesk.addNote("1001", { body: "Note" }, { email: "sam@oneix.local", externalUserId: "20" });
+    await zendesk.addComment("1001", { body: "Note", public: false }, { email: "sam@oneix.local", externalUserId: "20" });
 
-    expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0]?.headers.Authorization).toBe(`Basic ${Buffer.from("admin@acme.com/token:abc").toString("base64")}`);
-    expect(fake.calls[0]?.headers["X-On-Behalf-Of"]).toBeUndefined();
-    expect(fake.calls[0]?.body).toEqual({ ticket: { comment: { body: "Note", public: false, author_id: 20 } } });
+    expect(fake.calls.every((c) => c.headers.Authorization === `Basic ${Buffer.from("admin@acme.com/token:abc").toString("base64")}`)).toBe(true);
+    expect(putOf(fake.calls)?.headers["X-On-Behalf-Of"]).toBeUndefined();
+    expect(putOf(fake.calls)?.body).toEqual({ ticket: { comment: { body: "Note", public: false, author_id: 20 } } });
+  });
+
+  it("lists every agent and admin across pages, marking suspended ones inactive", async () => {
+    const { zendesk, calls } = provider({
+      "GET /api/v2/custom_roles.json": () => json({ custom_roles: [] }),
+      "GET /api/v2/users.json": (call) =>
+        call.url.searchParams.get("page[after]") === "p2"
+          ? json({ users: [{ ...agent, id: 21, name: "Gone", suspended: true }], meta: { has_more: false, after_cursor: null } })
+          : json({ users: [agent, { ...agent, id: 22, role: "admin", name: "Boss" }], meta: { has_more: true, after_cursor: "p2" } }),
+    });
+
+    const agents = await zendesk.listAgents();
+
+    expect(calls.find((c) => c.url.pathname === "/api/v2/users.json")?.url.searchParams.getAll("role[]")).toEqual(["agent", "admin"]);
+    expect(agents.map((a) => [a.externalId, a.role, a.active])).toEqual([
+      ["20", "agent", true],
+      ["22", "admin", true],
+      ["21", "agent", false],
+    ]);
+  });
+
+  it("reads each agent's reply permission and ticket access from roles", async () => {
+    const { zendesk } = provider({
+      "GET /api/v2/custom_roles.json": () =>
+        json({
+          custom_roles: [
+            { id: 900, name: "Staff", configuration: { ticket_comment_access: "public" } },
+            { id: 901, name: "Light agent", configuration: { ticket_comment_access: "none" } },
+          ],
+        }),
+      "GET /api/v2/users.json": () =>
+        json({
+          users: [
+            { ...agent, id: 30, name: "Staff", role_type: 0, custom_role_id: 900 },
+            { ...agent, id: 31, name: "Light", role_type: 1, custom_role_id: 901, ticket_restriction: "groups", moderator: true },
+            { ...agent, id: 32, name: "Admin", role: "admin", role_type: 4, ticket_restriction: null },
+          ],
+          meta: { has_more: false, after_cursor: null },
+        }),
+    });
+
+    const agents = await zendesk.listAgents();
+
+    expect(agents.map((a) => [a.name, a.roleNames, a.permissions])).toEqual([
+      ["Staff", ["Staff"], { publicReplies: true, ticketAccess: "all" }],
+      ["Light", ["Light agent", "Moderator"], { publicReplies: false, ticketAccess: "groups" }],
+      ["Admin", ["Admin"], { publicReplies: true, ticketAccess: "all" }],
+    ]);
+  });
+
+  it("falls back to the role type when custom roles are unavailable", async () => {
+    const { zendesk } = provider({
+      "GET /api/v2/custom_roles.json": () => json({ error: "Forbidden" }, 403),
+      "GET /api/v2/users.json": () =>
+        json({ users: [{ ...agent, id: 31, role_type: 1 }, { ...agent, id: 33, role_type: null }], meta: { has_more: false } }),
+    });
+
+    const agents = await zendesk.listAgents();
+
+    expect(agents.map((a) => a.permissions.publicReplies)).toEqual([false, true]);
+    expect(agents.map((a) => a.roleNames)).toEqual([["Light agent"], ["Agent"]]);
   });
 
   it("refreshes the token once when it is rejected", async () => {

@@ -1,5 +1,5 @@
 import type { TicketStatus } from "@oneix/contracts";
-import type { ExternalComment, ExternalCustomer, ExternalTicket } from "../provider.js";
+import type { ExternalAgent, ExternalComment, ExternalCustomer, ExternalTicket } from "../provider.js";
 import type { ZendeskComment, ZendeskStatus, ZendeskTicket, ZendeskUser } from "./types.js";
 
 export function fromZendeskStatus(status: ZendeskStatus): TicketStatus {
@@ -23,6 +23,56 @@ export function toCustomer(user: ZendeskUser): ExternalCustomer {
     name: user.name || null,
     email: user.email || null,
     phone: user.phone || null,
+  };
+}
+
+/** Zendesk role types limited to private comments: light agent, chat-only agent, contributor. */
+const PRIVATE_COMMENT_ROLE_TYPES = new Set([1, 2, 3]);
+
+/** Names for Zendesk's built-in role types, used when an agent has no custom role. */
+const ROLE_TYPE_NAMES: Record<number, string> = {
+  1: "Light agent",
+  2: "Chat-only agent",
+  3: "Contributor",
+  4: "Admin",
+  5: "Billing admin",
+};
+
+/** A Zendesk custom role, as far as oneix needs it. */
+export interface CustomRole {
+  name: string;
+  publicComments: boolean;
+}
+
+/** Every role the user holds, primary role first: "Light agent", "Moderator". */
+export function roleNamesOf(user: ZendeskUser, customRoles?: Map<number, CustomRole>): string[] {
+  const customRole = user.custom_role_id != null ? customRoles?.get(user.custom_role_id) : undefined;
+  const primary =
+    user.role === "admin"
+      ? "Admin"
+      : (customRole?.name ?? ROLE_TYPE_NAMES[user.role_type ?? -1] ?? (user.role === "agent" ? "Agent" : "End user"));
+  return user.moderator ? [primary, "Moderator"] : [primary];
+}
+
+/**
+ * @param customRoles the account's custom roles by ID. When they could not be read, pass undefined
+ *   and the role type decides.
+ */
+export function toAgent(user: ZendeskUser, customRoles?: Map<number, CustomRole>): ExternalAgent {
+  let publicReplies = user.role === "admin" || !PRIVATE_COMMENT_ROLE_TYPES.has(user.role_type ?? -1);
+  const customRole = user.custom_role_id != null ? customRoles?.get(user.custom_role_id) : undefined;
+  if (user.role !== "admin" && customRole) publicReplies = customRole.publicComments;
+  return {
+    externalId: String(user.id),
+    name: user.name,
+    email: user.email || null,
+    role: user.role === "end-user" ? "end_user" : user.role,
+    active: user.active !== false && user.suspended !== true,
+    roleNames: roleNamesOf(user, customRoles),
+    permissions: {
+      publicReplies,
+      ticketAccess: user.role === "admin" ? "all" : (user.ticket_restriction ?? "all"),
+    },
   };
 }
 

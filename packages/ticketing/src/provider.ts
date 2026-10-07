@@ -5,6 +5,10 @@ import type { TicketPriority, TicketStatus } from "@oneix/contracts";
  * Everything here is vendor-neutral: IDs are the backend's IDs as strings, called `externalId`.
  */
 export interface TicketingProvider {
+  /** The backend user the credentials belong to. Used to verify a connection. */
+  getCurrentUser(): Promise<ExternalAgent>;
+  /** Every agent and admin in the backend, including suspended ones. */
+  listAgents(): Promise<ExternalAgent[]>;
   findOrCreateCustomer(identity: CustomerIdentity): Promise<ExternalCustomer>;
   createTicket(input: CreateTicketInput, actor?: Actor): Promise<ExternalTicket>;
   /** Returns null when the ticket does not exist. */
@@ -14,7 +18,11 @@ export interface TicketingProvider {
   /** Tickets changed since a point in time, for cache backfill. */
   listTickets(filter: ListTicketsFilter): Promise<TicketPage>;
   updateTicket(externalId: string, changes: TicketChanges, actor?: Actor): Promise<ExternalTicket>;
-  addNote(externalId: string, note: { body: string }, actor?: Actor): Promise<void>;
+  /**
+   * Adds a comment, optionally changing the status in the same update.
+   * A public comment is sent to the requester by the backend (for example by email).
+   */
+  addComment(externalId: string, comment: NewComment, actor?: Actor): Promise<ExternalTicket>;
   addConversationRecord(externalId: string, record: ConversationRecord): Promise<void>;
 }
 
@@ -22,6 +30,26 @@ export interface TicketingProvider {
 export interface Actor {
   email: string;
   externalUserId: string | null;
+}
+
+export interface ExternalAgent {
+  externalId: string;
+  name: string;
+  email: string | null;
+  role: "agent" | "admin" | "end_user";
+  /** False when the agent is suspended or deleted in the backend. */
+  active: boolean;
+  /** Every role the agent holds in the backend, as the backend names them: "Light agent", "Moderator". */
+  roleNames: string[];
+  permissions: AgentPermissions;
+}
+
+/** What the backend lets an agent do. oneix enforces these so the backend never silently overrides an action. */
+export interface AgentPermissions {
+  /** False for agents limited to internal notes, such as Zendesk light agents. */
+  publicReplies: boolean;
+  /** Which tickets the agent may see in the backend. */
+  ticketAccess: "all" | "groups" | "organization" | "assigned" | "requested";
 }
 
 export interface CustomerIdentity {
@@ -67,6 +95,13 @@ export interface CreateTicketInput {
   subject: string;
   /** First internal comment on the ticket. */
   description: string;
+}
+
+export interface NewComment {
+  body: string;
+  /** True: a reply the requester sees. False: an internal note for agents only. */
+  public: boolean;
+  status?: TicketStatus;
 }
 
 export interface TicketChanges {

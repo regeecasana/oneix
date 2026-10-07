@@ -3,22 +3,34 @@ import type {
   ConversationRecord,
   CreateTicketInput,
   CustomerIdentity,
+  ExternalAgent,
   ExternalComment,
   ExternalCustomer,
   ExternalTicket,
   ListTicketsFilter,
+  NewComment,
   TicketChanges,
   TicketingProvider,
   TicketPage,
 } from "../provider.js";
 import { TicketingError } from "../errors.js";
 import { ZendeskClient, type ZendeskClientConfig } from "./client.js";
-import { indexUsers, toComment, toCustomer, toTicket, toZendeskStatus } from "./mapping.js";
+import {
+  type CustomRole,
+  indexUsers,
+  toAgent,
+  toComment,
+  toCustomer,
+  toTicket,
+  toZendeskStatus,
+} from "./mapping.js";
 import type {
   CommentsResponse,
+  CustomRolesResponse,
   IncrementalTicketsResponse,
   TicketResponse,
   UserResponse,
+  UsersPageResponse,
   UsersResponse,
   ZendeskComment,
   ZendeskTicket,
@@ -34,6 +46,39 @@ export class ZendeskProvider implements TicketingProvider {
 
   constructor(config: ZendeskConfig) {
     this.client = new ZendeskClient(config);
+  }
+
+  async getCurrentUser(): Promise<ExternalAgent> {
+    const { user } = await this.client.request<UserResponse>("GET", "/api/v2/users/me.json");
+    return toAgent(user);
+  }
+
+  async listAgents(): Promise<ExternalAgent[]> {
+    const customRoles = await this.customRoles();
+    const agents: ExternalAgent[] = [];
+    let after: string | undefined;
+    do {
+      const page = await this.client.request<UsersPageResponse>("GET", "/api/v2/users.json", {
+        query: { "role[]": ["agent", "admin"], "page[size]": 100, "page[after]": after },
+      });
+      agents.push(...page.users.map((user) => toAgent(user, customRoles)));
+      after = page.meta?.has_more ? (page.meta.after_cursor ?? undefined) : undefined;
+    } while (after);
+    return agents;
+  }
+
+  /** The account's custom roles by ID, or undefined when they can't be read. */
+  private async customRoles(): Promise<Map<number, CustomRole> | undefined> {
+    try {
+      const { custom_roles } = await this.client.request<CustomRolesResponse>("GET", "/api/v2/custom_roles.json");
+      return new Map(
+        custom_roles.map((r) => [r.id, { name: r.name, publicComments: r.configuration?.ticket_comment_access === "public" }]),
+      );
+    } catch (error) {
+      // Custom roles exist on Enterprise plans only; without them the role type decides.
+      if (error instanceof TicketingError && (error.status === 403 || error.status === 404)) return undefined;
+      throw error;
+    }
   }
 
   async findOrCreateCustomer(identity: CustomerIdentity): Promise<ExternalCustomer> {
@@ -144,11 +189,17 @@ export class ZendeskProvider implements TicketingProvider {
     return this.withUsers(response.ticket);
   }
 
-  async addNote(externalId: string, note: { body: string }, actor?: Actor): Promise<void> {
-    await this.client.request("PUT", `/api/v2/tickets/${id(externalId)}.json`, {
+  async addComment(externalId: string, comment: NewComment, actor?: Actor): Promise<ExternalTicket> {
+    const ticket: Record<string, unknown> = {
+      comment: { body: comment.body, public: comment.public, ...this.authorFor(actor) },
+    };
+    if (comment.status !== undefined) ticket.status = toZendeskStatus(comment.status);
+
+    const response = await this.client.request<TicketResponse>("PUT", `/api/v2/tickets/${id(externalId)}.json`, {
       onBehalfOf: actor?.email,
-      body: { ticket: { comment: { body: note.body, public: false, ...this.authorFor(actor) } } },
+      body: { ticket },
     });
+    return this.withUsers(response.ticket);
   }
 
   async addConversationRecord(externalId: string, record: ConversationRecord): Promise<void> {

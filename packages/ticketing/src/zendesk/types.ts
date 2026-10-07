@@ -20,6 +20,18 @@ export interface ZendeskUser {
   email: string | null;
   phone: string | null;
   role: "end-user" | "agent" | "admin";
+  active?: boolean;
+  suspended?: boolean;
+  /** 0 custom, 1 light agent, 2 chat-only, 3 contributor, 4 admin, 5 billing admin. */
+  role_type?: number | null;
+  custom_role_id?: number | null;
+  /** Can moderate help center community content. */
+  moderator?: boolean;
+  ticket_restriction?: "organization" | "groups" | "assigned" | "requested" | null;
+}
+
+export interface CustomRolesResponse {
+  custom_roles: { id: number; name: string; configuration?: { ticket_comment_access?: "public" | "none" | string } }[];
 }
 
 export interface ZendeskComment {
@@ -38,6 +50,11 @@ export interface TicketResponse {
 
 export interface UsersResponse {
   users: ZendeskUser[];
+}
+
+export interface UsersPageResponse {
+  users: ZendeskUser[];
+  meta?: { has_more: boolean; after_cursor: string | null };
 }
 
 export interface UserResponse {

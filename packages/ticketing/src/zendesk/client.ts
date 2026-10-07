@@ -14,7 +14,8 @@ export interface ZendeskClientConfig {
 }
 
 export interface RequestOptions {
-  query?: Record<string, string | number | undefined>;
+  /** Array values repeat the parameter, as in `role[]=agent&role[]=admin`. */
+  query?: Record<string, string | number | (string | number)[] | undefined>;
   body?: unknown;
   /** Agent email to act as, when impersonation is enabled. */
   onBehalfOf?: string;
@@ -57,7 +58,8 @@ export class ZendeskClient {
   async request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
     const url = new URL(path, this.baseUrl);
     for (const [key, value] of Object.entries(options.query ?? {})) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
+      if (value === undefined) continue;
+      for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, String(item));
     }
 
     for (let attempt = 0; ; attempt++) {
