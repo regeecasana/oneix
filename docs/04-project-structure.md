@@ -137,6 +137,7 @@ oneix/
 | `@oneix/contracts` | all | No runtime dependencies beyond Zod |
 | `@oneix/db` | api, worker | Only these two apps touch the database |
 | `@oneix/ticketing` | api, worker | The only place that knows Zendesk exists |
+| `@oneix/tenancy` | api, worker | Tenant connections: credential encryption, per-tenant ticketing clients, agent provisioning, onboarding |
 | `@oneix/cognigy` | api, worker | Server-side clients and payload types |
 | `@oneix/cxone` | api, worker, web | Separate `server` and `browser` entry points |
 | `@oneix/cognigy-extension` | uploaded to Cognigy | Nodes that call oneix webhooks from flows |

@@ -1,12 +1,14 @@
 # Data model (MVP)
 
-PostgreSQL through Prisma, defined in `packages/db`. Every table carries `tenantId`, `createdAt`, and `updatedAt`.
+PostgreSQL through Prisma, defined in `packages/db`. Every table carries `createdAt` and `updatedAt`. Every table except `Tenant` and `User` carries `tenantId`, and the API reads them through a tenant-scoped client (`scopedToTenant`) that filters every query by tenant.
 
 ## Diagram
 
 ```mermaid
 erDiagram
-  Tenant ||--o{ User : has
+  Tenant ||--o{ TenantConnection : has
+  Tenant ||--o{ TenantMembership : has
+  User ||--o{ TenantMembership : belongs_to
   Tenant ||--o{ Customer : has
   Customer ||--o{ Ticket : requests
   Ticket ||--o{ Conversation : records
@@ -25,20 +27,44 @@ erDiagram
 
 | Field | Notes |
 |---|---|
-| `id`, `name` | One row in the MVP |
+| `id`, `name` | One row per client |
+| `slug` | URL-safe name, used in webhook URLs and sign-in |
 | `settings` | JSON: retry rule, business timezone |
 
-### User
+### TenantConnection
 
-Agents and admins of the workspace.
+A tenant's connection to a vendor platform. One Zendesk connection per tenant.
 
 | Field | Notes |
 |---|---|
-| `id`, `email`, `name` | |
-| `role` | `agent`, `admin` |
+| `id`, `provider` | `zendesk` for now |
+| `subdomain` | Zendesk subdomain |
+| `authType` | `access_token`, `api_token`, `oauth_client` |
+| `credentials` | Encrypted at rest |
+| `webhookSecret` | Encrypted at rest |
+| `status` | `active`, `disabled`, `failing` |
+
+### User
+
+A person who signs in to oneix. Not tied to a tenant: one person can work for several clients.
+
+| Field | Notes |
+|---|---|
+| `id`, `name` | |
+| `email` | Unique |
 | `ssoSubject` | Subject from the identity provider |
-| `cxoneAgentId` | Mapped CXone agent |
-| `zendeskUserId` | Mapped Zendesk agent |
+
+### TenantMembership
+
+A user's access to one tenant, with their identities in that tenant's platforms. Provisioned from the tenant's Zendesk agents.
+
+| Field | Notes |
+|---|---|
+| `id`, `userId` | |
+| `role` | `agent`, `admin`, from the Zendesk role |
+| `zendeskUserId` | The agent in this tenant's Zendesk. Unique per tenant |
+| `cxoneAgentId` | The agent in this tenant's CXone |
+| `active` | False when the agent was removed or suspended in Zendesk |
 
 ### Customer
 

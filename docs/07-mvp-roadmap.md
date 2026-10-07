@@ -21,6 +21,19 @@ Milestones are ordered by dependency. Each one ends with something demonstrable.
 
 **Done when:** an agent works a ticket end to end in oneix, and no Zendesk screen is needed.
 
+**Status:** done for one tenant: inbox with pagination, ticket view, internal notes, status, priority, assignee, webhook and backfill sync.
+
+### Z0–Z3. Zendesk workspace
+
+Zendesk comes first: before the AI milestones, oneix becomes a complete replacement for the Zendesk Agent Workspace, for multiple tenants. Phases and the feature list are in [08-zendesk-workspace.md](08-zendesk-workspace.md).
+
+- **Z0.** Tenant connections: per-tenant Zendesk credentials, webhooks, backfill, and agents provisioned from Zendesk.
+- **Z1.** Full ticket view: replies, attachments, fields and forms, tags, groups, history, merge.
+- **Z2.** Finding work: views, search, macros, customer and organization profiles.
+- **Z3.** Productivity and live updates: realtime, collision, SLAs, satisfaction, side conversations, knowledge.
+
+**Done when:** an agent's whole day happens in oneix, for any tenant.
+
 ### M2. AI chat
 
 - `apps/widget` with chat.
@@ -73,7 +86,7 @@ Milestones are ordered by dependency. Each one ends with something demonstrable.
 | 3 | How SIP headers and handover data surface on the contact in the Agent SDK | M3, M4 |
 | 4 | Integrated or non-integrated CXone handover provider for the Cognigy tenant | M3 |
 | 5 | Single sign-on across oneix and the CXone agent session | M3 |
-| 6 | Zendesk seat licensing and partner terms for a hidden backend | Pricing, go-live |
+| 6 | ~~Zendesk seat licensing and partner terms for a hidden backend~~ Resolved: oneix is a Zendesk partner on the highest tier | — |
 | 7 | SIP trunk and number for outbound PSTN calls | M5 |
 | 8 | Consent and calling rules for outbound AI calls | M5 pilot |
 | 9 | Transcript and recording retention rule | Pilot with a real client |
@@ -91,4 +104,4 @@ Items 1 to 3 carry the most technical risk. Prove them with a spike during M0 or
 
 ## Deferred to the production phase
 
-Multi-tenant admin and onboarding, more channels, macros and SLA timers, supervisor tools, outbound campaigns and compliance tooling, reporting and warehouse, event bus, infrastructure as code, high availability, tracing, PII redaction, second ticketing backend.
+Self-service tenant administration, more channels, supervisor tools, outbound campaigns and compliance tooling, reporting and warehouse, event bus, infrastructure as code, high availability, tracing, PII redaction, second ticketing backend.

@@ -33,6 +33,7 @@ This README sits at the repo root. The numbered files go in `docs/`.
 | [05-integrations.md](docs/05-integrations.md) | Cognigy, CXone, and Zendesk integration points |
 | [06-data-model.md](docs/06-data-model.md) | Entities and enums |
 | [07-mvp-roadmap.md](docs/07-mvp-roadmap.md) | Milestones, open items, what is deferred |
+| [08-zendesk-workspace.md](docs/08-zendesk-workspace.md) | Replacing the Zendesk Agent Workspace: feature map, tenancy, phases |
 
 ## Local development (planned)
 

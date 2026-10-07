@@ -2,7 +2,12 @@
 
 ## Goal
 
-Prove the core loop end to end for one tenant: a customer contacts by web chat or web call, an AI agent handles it, a human can receive or take over the conversation inside the oneix workspace, and the result lands on a ticket.
+Prove two things for multiple client tenants:
+
+1. **oneix replaces the Zendesk Agent Workspace.** Agents work every ticket in oneix, using everything Zendesk offers, without seeing Zendesk. See [08-zendesk-workspace.md](08-zendesk-workspace.md).
+2. **The core conversation loop.** A customer contacts by web chat or web call, an AI agent handles it, a human can receive or take over the conversation inside the oneix workspace, and the result lands on a ticket.
+
+oneix is a B2B product. Each client is a tenant with its own Zendesk instance.
 
 ## In scope
 
@@ -15,8 +20,7 @@ Prove the core loop end to end for one tenant: a customer contacts by web chat o
 ### Agent side (oneix workspace)
 
 - Sign in with SSO.
-- Inbox: ticket list with basic filters (status, assignee).
-- Ticket view: conversation thread, internal notes, status, priority, assignee.
+- Full Zendesk agent experience in oneix: replies and notes, attachments, fields and forms, views, search, macros, customer and organization profiles, SLAs, satisfaction ratings, side conversations, knowledge articles, and live updates. The feature list is in [08-zendesk-workspace.md](08-zendesk-workspace.md).
 - Live view: conversations currently handled by AI, with live transcript.
 - Take over a live AI chat or call.
 - Receive conversations handed over by the AI, with ticket and transcript already open.
@@ -26,6 +30,7 @@ Prove the core loop end to end for one tenant: a customer contacts by web chat o
 
 ### Platform
 
+- Multiple tenants, each with its own Zendesk connection, webhooks, and agents.
 - Ticket created or matched for every conversation, stored in Zendesk.
 - Transcript and AI summary written to the ticket when the conversation ends.
 - Outbound call retry on no answer, with the outcome written to the ticket.
@@ -38,9 +43,9 @@ Prove the core loop end to end for one tenant: a customer contacts by web chat o
 
 ## Out of scope (production phase)
 
-- Multi-tenant administration and onboarding.
-- Email, WhatsApp, SMS, and social channels.
-- Macros, SLA timers, views builder, collision detection.
+- Self-service tenant administration. Tenants are onboarded by oneix operations with a script.
+- Zendesk configuration in oneix (triggers, automations, SLA policies, fields, views, macros). oneix operations configures these in Zendesk Admin Center.
+- WhatsApp, SMS, and social channels. Email works through Zendesk: agents reply in oneix and Zendesk sends the email.
 - Supervisor monitoring, whisper, and barge.
 - Outbound campaigns, do-not-call lists, calling-hour rules.
 - Reporting beyond a basic activity dashboard.
@@ -49,6 +54,7 @@ Prove the core loop end to end for one tenant: a customer contacts by web chat o
 ## Assumptions
 
 - A NICE CXone tenant, a Cognigy.AI tenant with Voice Gateway, and a Zendesk instance are available for the MVP.
+- oneix is a Zendesk partner and runs on the highest Zendesk tier, so every Zendesk API is available and reselling a hidden Zendesk is covered.
 - Voice transfer from Cognigy Voice Gateway to CXone already works (done by the team).
 - Each oneix agent has a CXone agent and a Zendesk agent seat behind it.
 - One language for the AI agent.

@@ -62,7 +62,8 @@ flowchart LR
 
 ## Principles
 
-- **Zendesk is the source of truth for tickets.** oneix keeps a cache for fast lists and updates it from webhooks.
+- **Zendesk is the source of truth for tickets.** Ticket detail, views, and search are read from Zendesk live. oneix keeps a ticket cache, updated from webhooks, to link tickets to conversations. See [08-zendesk-workspace.md](08-zendesk-workspace.md).
+- **Each tenant has its own Zendesk.** Every Zendesk call is made with the tenant's own connection.
 - **oneix is the source of truth for conversations.** Conversation state, transcript, and handover history live in oneix's database.
 - **Live conversations run in Cognigy and CXone. Records land in Zendesk.** Zendesk is never in the live path.
 - **Every vendor sits behind an adapter package.** The API talks to `@oneix/ticketing`, `@oneix/cognigy`, and `@oneix/cxone`, never to vendor APIs directly.
@@ -149,7 +150,7 @@ Routing a takeover to the specific agent who clicked the button depends on CXone
 | GET | `/tickets` | List tickets with filters |
 | GET | `/tickets/:id` | Ticket with conversation thread |
 | PATCH | `/tickets/:id` | Update status, priority, assignee |
-| POST | `/tickets/:id/notes` | Add an internal note |
+| POST | `/tickets/:id/comments` | Public reply (emailed to the customer) or internal note, optionally changing the status |
 | GET | `/conversations` | List conversations, filter by state |
 | GET | `/conversations/:id` | Conversation with transcript |
 | POST | `/conversations/:id/takeover` | Agent takeover |
@@ -179,4 +180,4 @@ Routing a takeover to the specific agent who clicked the button depends on CXone
 - **Idempotency:** every webhook is stored by its event key before processing, and duplicates are ignored.
 - **Webhook security:** shared secret or signature check per sender.
 - **Failure handling:** vendor calls from webhooks are queued, retried with backoff, and logged on final failure.
-- **Tenancy:** the MVP runs one tenant, and every table still carries `tenantId`.
+- **Tenancy:** multiple tenants from the start. Every table carries `tenantId`, every request is scoped to the signed-in agent's tenant, and each tenant has its own Zendesk connection.

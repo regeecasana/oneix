@@ -114,13 +114,13 @@ addConversationRecord(id, transcript, summary)
 
 ## Identity mapping
 
-One oneix user maps to one CXone agent and one Zendesk agent.
+One oneix user can work for several tenants. In each tenant, their membership maps them to that tenant's CXone agent and Zendesk agent.
 
 | oneix | CXone | Zendesk |
 |---|---|---|
-| `User.id` | `cxoneAgentId` | `zendeskUserId` |
+| `TenantMembership` (user + tenant) | `cxoneAgentId` | `zendeskUserId` |
 
-For the MVP, mappings are seeded by script.
+Zendesk mappings are provisioned automatically from each tenant's Zendesk agents, matched by email. CXone mappings come with M3.
 
 ## Secrets
 
@@ -130,7 +130,7 @@ For the MVP, mappings are seeded by script.
 | Voice Gateway API key, account SID | worker |
 | CXone API credentials | api |
 | CXone application registration (client ID) | web |
-| Zendesk OAuth credentials | api, worker |
+| Zendesk credentials and webhook secret, one set per tenant, encrypted in the database | api, worker |
 | Webhook shared secrets, one per sender | api |
 
 ## References
