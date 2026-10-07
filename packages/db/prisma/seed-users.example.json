@@ -1,0 +1,17 @@
+[
+  {
+    "email": "admin@oneix.local",
+    "name": "Ada Admin",
+    "role": "admin"
+  },
+  {
+    "email": "agent1@oneix.local",
+    "name": "Sam Agent",
+    "role": "agent"
+  },
+  {
+    "email": "agent2@oneix.local",
+    "name": "Robin Agent",
+    "role": "agent"
+  }
+]

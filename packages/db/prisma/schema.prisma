@@ -1,0 +1,165 @@
+// oneix data model. See docs/06-data-model.md.
+// M1 covers tenants, users, customers, the ticket cache, webhook events, and the audit log.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  agent
+  admin
+}
+
+enum TicketStatus {
+  new
+  open
+  pending
+  on_hold
+  solved
+  closed
+}
+
+enum TicketPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+enum WebhookSource {
+  cognigy
+  voice_gateway
+  zendesk
+}
+
+enum WebhookEventStatus {
+  pending
+  processed
+  failed
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  /// Retry rule, business timezone.
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users         User[]
+  customers     Customer[]
+  tickets       Ticket[]
+  webhookEvents WebhookEvent[]
+  auditLogs     AuditLog[]
+}
+
+/// Agents and admins of the workspace.
+model User {
+  id            String   @id @default(cuid())
+  tenantId      String
+  email         String
+  name          String
+  role          UserRole @default(agent)
+  ssoSubject    String?
+  cxoneAgentId  String?
+  zendeskUserId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant          Tenant     @relation(fields: [tenantId], references: [id])
+  assignedTickets Ticket[]
+  auditLogs       AuditLog[]
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, zendeskUserId])
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  tenantId   String
+  name       String?
+  email      String?
+  /// E.164
+  phone      String?
+  /// Customer ID in the ticketing backend.
+  externalId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  tickets Ticket[]
+
+  @@unique([tenantId, externalId])
+}
+
+/// A cache of the ticketing backend's ticket. The backend remains the source of truth.
+model Ticket {
+  id                String          @id @default(cuid())
+  tenantId          String
+  /// oneix ticket number, shown in the workspace.
+  number            Int             @unique @default(autoincrement())
+  /// Ticket ID in the ticketing backend.
+  externalId        String
+  customerId        String?
+  assigneeId        String?
+  subject           String
+  status            TicketStatus
+  priority          TicketPriority?
+  /// Last update time reported by the backend. Older snapshots never overwrite newer ones.
+  externalUpdatedAt DateTime
+  lastSyncedAt      DateTime
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
+  assignee User?     @relation(fields: [assigneeId], references: [id])
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId, status, assigneeId])
+  @@index([tenantId, externalUpdatedAt(sort: Desc), id])
+}
+
+model WebhookEvent {
+  id          String             @id @default(cuid())
+  tenantId    String
+  source      WebhookSource
+  /// Unique per source, used for idempotency.
+  eventKey    String
+  payload     Json
+  status      WebhookEventStatus @default(pending)
+  attempts    Int                @default(0)
+  processedAt DateTime?
+  error       String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([source, eventKey])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  actorId    String?
+  /// For example `ticket.updated`, `ticket.note_added`.
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  actor  User?  @relation(fields: [actorId], references: [id])
+
+  @@index([tenantId, targetType, targetId])
+}
