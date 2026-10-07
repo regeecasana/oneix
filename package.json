@@ -1,0 +1,35 @@
+{
+  "name": "oneix",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.6.2",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write .",
+    "db:generate": "npm run generate -w @oneix/db",
+    "db:migrate": "npm run migrate -w @oneix/db",
+    "db:seed": "npm run seed -w @oneix/db"
+  },
+  "prettier": "@oneix/config/prettier",
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.12.0",
+    "prettier": "^3.6.2",
+    "turbo": "^2.11.7",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.0",
+    "vitest": "^5.0.3"
+  }
+}
