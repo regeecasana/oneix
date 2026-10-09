@@ -32,11 +32,12 @@ function fail(message) {
 }
 
 /** Runs a command in the repo root with inherited output. Returns true on success. */
-function run(command, { quiet = false } = {}) {
+function run(command, { quiet = false, env } = {}) {
   const result = spawnSync(command, {
     cwd: root,
     shell: true,
     stdio: quiet ? "ignore" : "inherit",
+    env: { ...process.env, ...env },
   });
   return result.status === 0;
 }
@@ -59,7 +60,8 @@ if (firstRun) {
   process.exit(0);
 }
 
-process.loadEnvFile(envFile);
+// .env is not loaded here: each app reads it itself. Loading it would leak NODE_ENV=development
+// into `next build`, which then renders production pages with React's development build.
 
 // 2. Docker services
 step("Checking Docker");
@@ -83,7 +85,10 @@ step("Applying database migrations");
 if (!run("npm run migrate:deploy -w @oneix/db")) fail("Migrations failed.");
 
 step("Building the apps");
-if (!run("npx turbo run build --output-logs=errors-only")) fail("The build failed. See the output above.");
+// Each tool sets its own NODE_ENV; one inherited from the shell would break the web build.
+if (!run("npx turbo run build --output-logs=errors-only", { env: { NODE_ENV: undefined } })) {
+  fail("The build failed. See the output above.");
+}
 
 // 5. Development tenant
 step("Connecting the development tenant");
