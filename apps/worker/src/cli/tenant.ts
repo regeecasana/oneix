@@ -14,6 +14,7 @@ import {
   zendeskCredentialsFromEnv,
 } from "@oneix/tenancy";
 import { Queue } from "bullmq";
+import { Redis } from "ioredis";
 import { z } from "zod";
 
 const USAGE = `Usage: npm run tenant -- <command> [options]
@@ -33,6 +34,8 @@ Commands
                       which keeps them out of your shell history.
   list                Show every tenant, its connection status, agents, and cached tickets.
   sync-agents         Provision agents from Zendesk now.          --slug <slug>
+  resync-tickets      Re-import every ticket from Zendesk, for example after oneix starts storing a
+                      new ticket field.                            --slug <slug>
   set-webhook-secret  Store the Zendesk webhook signing secret.  --slug <slug> --secret <secret>
   disable / enable    Stop or resume all Zendesk traffic for a tenant.  --slug <slug>
   bootstrap           Development: connect the tenant in DEV_TENANT_SLUG from ZENDESK_* variables,
@@ -100,6 +103,8 @@ async function run(command: string): Promise<void> {
       return list();
     case "sync-agents":
       return syncAgentsNow(required("slug"));
+    case "resync-tickets":
+      return resyncTickets(required("slug"));
     case "set-webhook-secret":
       return setWebhookSecret(required("slug"), values.secret ?? required("webhook-secret"));
     case "disable":
@@ -190,6 +195,19 @@ async function syncAgentsNow(slug: string): Promise<void> {
   const ticketing = await new TicketingRegistry(prisma, secrets).for(tenantId);
   const result = await syncAgents(prisma, tenantId, ticketing);
   console.log(`✔ ${slug}: ${result.active} active, ${result.deactivated} deactivated, ${result.skipped} skipped`);
+}
+
+async function resyncTickets(slug: string): Promise<void> {
+  const tenantId = await tenantIdOf(prisma, slug);
+  const redis = new Redis(redisConnectionFromUrl(env.REDIS_URL));
+  try {
+    // The worker's backfill starts from the beginning when it has no cursor.
+    await redis.del(`oneix:ticket-backfill:${tenantId}:cursor`);
+  } finally {
+    redis.disconnect();
+  }
+  await queueImport(tenantId);
+  console.log(`✔ ${slug}: full ticket re-import queued; the worker runs it in the background`);
 }
 
 async function setWebhookSecret(slug: string, secret: string): Promise<void> {
