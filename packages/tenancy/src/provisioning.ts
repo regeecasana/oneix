@@ -75,6 +75,8 @@ async function upsertMembership(
     roleNames: agent.roleNames,
     canReplyPublicly: agent.permissions.publicReplies,
     ticketAccess: agent.permissions.ticketAccess,
+    groupExternalIds: agent.groupExternalIds,
+    organizationExternalIds: agent.organizationExternalIds,
   };
   await prisma.tenantMembership.upsert({
     where: { tenantId_userId: { tenantId, userId: user.id } },

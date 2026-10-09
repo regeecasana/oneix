@@ -17,6 +17,8 @@ export interface TicketSnapshot {
     phone: string | null;
   } | null;
   assigneeExternalId: string | null;
+  groupExternalId: string | null;
+  organizationExternalId: string | null;
   updatedAt: Date;
   deleted: boolean;
 }
@@ -66,6 +68,8 @@ export async function cacheTicketSnapshot(
   const now = new Date();
   const data = {
     subject: snapshot.subject,
+    groupExternalId: snapshot.groupExternalId,
+    organizationExternalId: snapshot.organizationExternalId,
     status: snapshot.status,
     priority: snapshot.priority,
     customerId: customer?.id ?? null,

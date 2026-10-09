@@ -129,22 +129,26 @@ model User {
 
 /// A user's access to one tenant, with their identities in that tenant's platforms.
 model TenantMembership {
-  id               String       @id @default(cuid())
-  tenantId         String
-  userId           String
-  role             UserRole     @default(agent)
+  id                      String       @id @default(cuid())
+  tenantId                String
+  userId                  String
+  role                    UserRole     @default(agent)
   /// Agent in this tenant's Zendesk. Set when agents are provisioned from Zendesk.
-  zendeskUserId    String?
-  cxoneAgentId     String?
+  zendeskUserId           String?
+  cxoneAgentId            String?
   /// Every role the agent holds in the backend, as it names them: "Light agent", "Moderator".
-  roleNames        String[]     @default([])
+  roleNames               String[]     @default([])
   /// False for agents limited to internal notes, such as Zendesk light agents.
-  canReplyPublicly Boolean      @default(true)
-  ticketAccess     TicketAccess @default(all)
+  canReplyPublicly        Boolean      @default(true)
+  ticketAccess            TicketAccess @default(all)
+  /// Backend groups the agent belongs to.
+  groupExternalIds        String[]     @default([])
+  /// Backend organizations the agent belongs to.
+  organizationExternalIds String[]     @default([])
   /// False when the agent was removed or suspended in the backend.
-  active           Boolean      @default(true)
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  active                  Boolean      @default(true)
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
   user   User   @relation(fields: [userId], references: [id])
@@ -174,22 +178,26 @@ model Customer {
 
 /// A cache of the ticketing backend's ticket. The backend remains the source of truth.
 model Ticket {
-  id                String          @id @default(cuid())
-  tenantId          String
+  id                     String          @id @default(cuid())
+  tenantId               String
   /// oneix ticket number, shown in the workspace.
-  number            Int             @unique @default(autoincrement())
+  number                 Int             @unique @default(autoincrement())
   /// Ticket ID in the ticketing backend.
-  externalId        String
-  customerId        String?
-  assigneeId        String?
-  subject           String
-  status            TicketStatus
-  priority          TicketPriority?
+  externalId             String
+  customerId             String?
+  assigneeId             String?
+  subject                String
+  /// Backend group the ticket belongs to; group-restricted agents see only their groups' tickets.
+  groupExternalId        String?
+  /// Backend organization of the requester; organization-restricted agents see only theirs.
+  organizationExternalId String?
+  status                 TicketStatus
+  priority               TicketPriority?
   /// Last update time reported by the backend. Older snapshots never overwrite newer ones.
-  externalUpdatedAt DateTime
-  lastSyncedAt      DateTime
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  externalUpdatedAt      DateTime
+  lastSyncedAt           DateTime
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id])
   customer Customer? @relation(fields: [customerId], references: [id])
@@ -197,6 +205,7 @@ model Ticket {
 
   @@unique([tenantId, externalId])
   @@index([tenantId, status, assigneeId])
+  @@index([tenantId, groupExternalId])
   @@index([tenantId, externalUpdatedAt(sort: Desc), id])
 }
 
