@@ -40,6 +40,7 @@ How tenants work:
 - **Each tenant has its own Zendesk connection**, stored in the database with its credentials encrypted. Every Zendesk call uses the tenant's own credentials, so tenants never share data or rate limits.
 - **Agents come from Zendesk.** Every Zendesk agent and admin of a tenant becomes a oneix agent automatically, linked by their Zendesk user ID. Agents removed or suspended in Zendesk lose access. The sync runs every hour and when a tenant is added.
 - **One person can work for several clients.** Agents belong to tenants through memberships; an agent in more than one tenant switches client from the header.
+- **Agents see what Zendesk lets them see.** Each agent's Zendesk role, public-reply permission, and ticket restriction (all, groups, organization, or assigned tickets) are synced. A group-restricted agent sees only their groups' tickets, and light agents can add internal notes only.
 - **Every query is scoped to the agent's tenant.** The API uses a database client that adds the tenant filter itself, so a forgotten filter can't show one client's data to another.
 
 How ticket data moves:
@@ -113,6 +114,7 @@ Credentials are read from `ZENDESK_EMAIL` and `ZENDESK_API_TOKEN` (or the other 
 | `npm run tenant -- list` | Every tenant with its Zendesk, connection status, webhook, agents, and cached tickets |
 | `npm run tenant -- add ...` | Creates a tenant, or updates one, for example to rotate credentials |
 | `npm run tenant -- sync-agents --slug acme` | Provisions agents from Zendesk now instead of waiting for the hourly sync |
+| `npm run tenant -- resync-tickets --slug acme` | Re-imports every ticket, for example after an upgrade adds a ticket field |
 | `npm run tenant -- set-webhook-secret --slug acme --secret ...` | Stores the signing secret of the tenant's Zendesk webhook |
 | `npm run tenant -- disable --slug acme` | Stops all Zendesk traffic for the tenant. `enable` resumes it |
 

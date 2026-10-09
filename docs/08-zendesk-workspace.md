@@ -117,6 +117,8 @@ Per-tenant Zendesk connections stored in the database, per-tenant webhooks and b
 
 Everything in [Ticket work](#ticket-work).
 
+**Status:** in progress. Built: public replies and internal notes with "send as", agent permissions mirrored from Zendesk (light agents limited to notes), and ticket access: agents restricted to their groups, organization, or assigned tickets in Zendesk see only those tickets in oneix.
+
 **Done when:** an agent can handle any ticket, including email tickets, from first reply to solved, without Zendesk.
 
 ### Z2. Finding work

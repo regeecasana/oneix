@@ -64,6 +64,10 @@ A user's access to one tenant, with their identities in that tenant's platforms.
 | `role` | `agent`, `admin`, from the Zendesk role |
 | `zendeskUserId` | The agent in this tenant's Zendesk. Unique per tenant |
 | `cxoneAgentId` | The agent in this tenant's CXone |
+| `roleNames` | Every role the agent holds in Zendesk, such as "Light agent", "Moderator" |
+| `canReplyPublicly` | False for agents limited to internal notes, such as light agents |
+| `ticketAccess` | `all`, `groups`, `organization`, `assigned`, `requested`, mirrored from Zendesk |
+| `groupExternalIds`, `organizationExternalIds` | The agent's Zendesk groups and organizations |
 | `active` | False when the agent was removed or suspended in Zendesk |
 
 ### Customer
@@ -83,6 +87,7 @@ A cache of the ticketing backend's ticket. Zendesk remains the source of truth.
 | `externalId` | Ticket ID in the ticketing backend |
 | `customerId`, `assigneeId` | |
 | `subject`, `status`, `priority` | |
+| `groupExternalId`, `organizationExternalId` | Backend group and requester organization. Decide visibility for restricted agents |
 | `lastSyncedAt` | Last refresh from the backend |
 
 ### Conversation
