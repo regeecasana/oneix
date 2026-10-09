@@ -14,6 +14,7 @@ import type { z } from "zod";
 import type { SessionUser } from "../../common/auth.js";
 import { PRISMA, TICKETING } from "../../common/providers.module.js";
 import { AuditService } from "../audit/audit.service.js";
+import { ticketAccessWhere } from "./ticket-access.js";
 import { type TicketRow, ticketInclude, toThreadEntry, toTicketSummary } from "./tickets.mapper.js";
 
 type ListQuery = z.output<typeof ListTicketsQuery>;
@@ -29,11 +30,12 @@ export class TicketsService {
   /** Inbox list, served from the cache, one page at a time, newest activity first. */
   async list(user: SessionUser, query: ListQuery): Promise<ListTicketsResponse> {
     const db = this.db(user);
-    const where: Prisma.TicketWhereInput = {};
-    if (query.status) where.status = query.status;
-    if (query.assignee === "me") where.assigneeId = user.id;
-    else if (query.assignee === "unassigned") where.assigneeId = null;
-    else if (query.assignee) where.assigneeId = query.assignee;
+    const filters: Prisma.TicketWhereInput = {};
+    if (query.status) filters.status = query.status;
+    if (query.assignee === "me") filters.assigneeId = user.id;
+    else if (query.assignee === "unassigned") filters.assigneeId = null;
+    else if (query.assignee) filters.assigneeId = query.assignee;
+    const where: Prisma.TicketWhereInput = { AND: [filters, ticketAccessWhere(user)] };
 
     const [total, rows] = await db.$transaction([
       db.ticket.count({ where }),
@@ -142,7 +144,11 @@ export class TicketsService {
   }
 
   private async findOrThrow(user: SessionUser, id: string): Promise<TicketRow> {
-    const row = await this.db(user).ticket.findFirst({ where: { id }, include: ticketInclude });
+    // A ticket outside the agent's access looks exactly like one that doesn't exist.
+    const row = await this.db(user).ticket.findFirst({
+      where: { AND: [{ id }, ticketAccessWhere(user)] },
+      include: ticketInclude,
+    });
     if (!row) throw new NotFoundException("Ticket not found");
     return row;
   }

@@ -8,7 +8,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import type { PrismaClient, UserRole } from "@oneix/db";
+import type { PrismaClient, TicketAccess, UserRole } from "@oneix/db";
 import type { Request } from "express";
 import { APP_CONFIG, type AppConfig } from "../config/config.js";
 import { PRISMA } from "./providers.module.js";
@@ -25,6 +25,10 @@ export interface SessionUser {
   /** The agent's user ID in this tenant's ticketing backend. */
   zendeskUserId: string | null;
   canReplyPublicly: boolean;
+  /** Which tickets the agent may see, mirrored from the backend. */
+  ticketAccess: TicketAccess;
+  groupExternalIds: string[];
+  organizationExternalIds: string[];
 }
 
 type AuthedRequest = Request & { sessionUser?: SessionUser };
@@ -67,6 +71,9 @@ export class AuthGuard implements CanActivate {
         role: true,
         zendeskUserId: true,
         canReplyPublicly: true,
+        ticketAccess: true,
+        groupExternalIds: true,
+        organizationExternalIds: true,
         active: true,
         user: { select: { email: true, name: true } },
       },
@@ -81,6 +88,9 @@ export class AuthGuard implements CanActivate {
       role: membership.role,
       zendeskUserId: membership.zendeskUserId,
       canReplyPublicly: membership.canReplyPublicly,
+      ticketAccess: membership.ticketAccess,
+      groupExternalIds: membership.groupExternalIds,
+      organizationExternalIds: membership.organizationExternalIds,
     };
     return true;
   }
