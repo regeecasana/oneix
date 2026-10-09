@@ -27,6 +27,8 @@ import {
 import type {
   CommentsResponse,
   CustomRolesResponse,
+  GroupMembershipsResponse,
+  OrganizationMembershipsResponse,
   IncrementalTicketsResponse,
   TicketResponse,
   UserResponse,
@@ -54,17 +56,58 @@ export class ZendeskProvider implements TicketingProvider {
   }
 
   async listAgents(): Promise<ExternalAgent[]> {
-    const customRoles = await this.customRoles();
-    const agents: ExternalAgent[] = [];
+    const [customRoles, groupsByUser] = await Promise.all([this.customRoles(), this.groupsByUser()]);
+    const users: ZendeskUser[] = [];
     let after: string | undefined;
     do {
       const page = await this.client.request<UsersPageResponse>("GET", "/api/v2/users.json", {
         query: { "role[]": ["agent", "admin"], "page[size]": 100, "page[after]": after },
       });
-      agents.push(...page.users.map((user) => toAgent(user, customRoles)));
+      users.push(...page.users);
       after = page.meta?.has_more ? (page.meta.after_cursor ?? undefined) : undefined;
     } while (after);
+
+    const agents: ExternalAgent[] = [];
+    for (const user of users) {
+      // Organization-restricted agents may belong to several organizations; others only need their primary one.
+      const organizations =
+        user.role !== "admin" && user.ticket_restriction === "organization"
+          ? await this.organizationsOf(user.id)
+          : undefined;
+      agents.push(toAgent(user, customRoles, { groups: groupsByUser.get(user.id) ?? [], organizations }));
+    }
     return agents;
+  }
+
+  /** Every agent's group IDs, from all group memberships in the account. */
+  private async groupsByUser(): Promise<Map<number, string[]>> {
+    const groups = new Map<number, string[]>();
+    let after: string | undefined;
+    do {
+      const page = await this.client.request<GroupMembershipsResponse>("GET", "/api/v2/group_memberships.json", {
+        query: { "page[size]": 100, "page[after]": after },
+      });
+      for (const m of page.group_memberships) {
+        groups.set(m.user_id, [...(groups.get(m.user_id) ?? []), String(m.group_id)]);
+      }
+      after = page.meta?.has_more ? (page.meta.after_cursor ?? undefined) : undefined;
+    } while (after);
+    return groups;
+  }
+
+  private async organizationsOf(userId: number): Promise<string[]> {
+    const organizations: string[] = [];
+    let after: string | undefined;
+    do {
+      const page = await this.client.request<OrganizationMembershipsResponse>(
+        "GET",
+        `/api/v2/users/${userId}/organization_memberships.json`,
+        { query: { "page[size]": 100, "page[after]": after } },
+      );
+      organizations.push(...page.organization_memberships.map((m) => String(m.organization_id)));
+      after = page.meta?.has_more ? (page.meta.after_cursor ?? undefined) : undefined;
+    } while (after);
+    return organizations;
   }
 
   /** The account's custom roles by ID, or undefined when they can't be read. */

@@ -41,6 +41,10 @@ export interface ExternalAgent {
   active: boolean;
   /** Every role the agent holds in the backend, as the backend names them: "Light agent", "Moderator". */
   roleNames: string[];
+  /** Groups the agent belongs to. */
+  groupExternalIds: string[];
+  /** Organizations the agent belongs to, for organization-restricted agents. */
+  organizationExternalIds: string[];
   permissions: AgentPermissions;
 }
 
@@ -73,6 +77,9 @@ export interface ExternalTicket {
   priority: TicketPriority | null;
   requester: ExternalCustomer | null;
   assigneeExternalId: string | null;
+  /** The group the ticket is assigned to, which decides who may see it under group restrictions. */
+  groupExternalId: string | null;
+  organizationExternalId: string | null;
   createdAt: Date;
   updatedAt: Date;
   deleted: boolean;

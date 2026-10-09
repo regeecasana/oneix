@@ -47,7 +47,10 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 const tokenRoute = { "POST /oauth/tokens": () => json({ access_token: "tok", expires_in: 3600 }) };
-const usersRoute = { "GET /api/v2/users/show_many.json": () => json({ users: [customer] }) };
+const usersRoute = {
+  "GET /api/v2/users/show_many.json": () => json({ users: [customer] }),
+  "GET /api/v2/group_memberships.json": () => json({ group_memberships: [], meta: { has_more: false } }),
+};
 const putOf = (calls: Call[]) => calls.find((c) => c.method === "PUT");
 
 function provider(routes: Record<string, (call: Call) => Response>, impersonate = false) {
@@ -77,6 +80,8 @@ describe("ZendeskProvider", () => {
       priority: "high",
       requester: { externalId: "10", name: "Casey Customer", email: "casey@example.com", phone: null },
       assigneeExternalId: "20",
+      groupExternalId: null,
+      organizationExternalId: null,
       createdAt: new Date("2026-10-01T10:00:00Z"),
       updatedAt: new Date("2026-10-02T10:00:00Z"),
       deleted: false,
@@ -286,6 +291,45 @@ describe("ZendeskProvider", () => {
 
     expect(agents.map((a) => a.permissions.publicReplies)).toEqual([false, true]);
     expect(agents.map((a) => a.roleNames)).toEqual([["Light agent"], ["Agent"]]);
+  });
+
+  it("reads ticket groups and each agent's group and organization memberships", async () => {
+    const { zendesk, calls } = provider({
+      "GET /api/v2/tickets/1001.json": () => json({ ticket: { ...ticket, group_id: 500, organization_id: 600 }, users: [] }),
+      "GET /api/v2/custom_roles.json": () => json({ custom_roles: [] }),
+      "GET /api/v2/group_memberships.json": () =>
+        json({
+          group_memberships: [
+            { user_id: 31, group_id: 500 },
+            { user_id: 31, group_id: 501 },
+            { user_id: 32, group_id: 502 },
+          ],
+          meta: { has_more: false },
+        }),
+      "GET /api/v2/users/33/organization_memberships.json": () =>
+        json({ organization_memberships: [{ user_id: 33, organization_id: 600 }, { user_id: 33, organization_id: 601 }] }),
+      "GET /api/v2/users.json": () =>
+        json({
+          users: [
+            { ...agent, id: 31, ticket_restriction: "groups", organization_id: 600 },
+            { ...agent, id: 32, ticket_restriction: null },
+            { ...agent, id: 33, ticket_restriction: "organization", organization_id: 600 },
+          ],
+          meta: { has_more: false },
+        }),
+    });
+
+    const fetched = await zendesk.getTicket("1001");
+    const agents = await zendesk.listAgents();
+
+    expect([fetched?.groupExternalId, fetched?.organizationExternalId]).toEqual(["500", "600"]);
+    expect(agents.map((a) => [a.externalId, a.groupExternalIds, a.organizationExternalIds])).toEqual([
+      ["31", ["500", "501"], ["600"]],
+      ["32", ["502"], []],
+      ["33", [], ["600", "601"]],
+    ]);
+    // Only the organization-restricted agent needs its memberships looked up.
+    expect(calls.filter((c) => c.url.pathname.includes("organization_memberships"))).toHaveLength(1);
   });
 
   it("refreshes the token once when it is rejected", async () => {

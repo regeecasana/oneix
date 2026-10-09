@@ -58,7 +58,16 @@ export function roleNamesOf(user: ZendeskUser, customRoles?: Map<number, CustomR
  * @param customRoles the account's custom roles by ID. When they could not be read, pass undefined
  *   and the role type decides.
  */
-export function toAgent(user: ZendeskUser, customRoles?: Map<number, CustomRole>): ExternalAgent {
+export interface AgentMemberships {
+  groups?: string[];
+  organizations?: string[];
+}
+
+export function toAgent(
+  user: ZendeskUser,
+  customRoles?: Map<number, CustomRole>,
+  memberships: AgentMemberships = {},
+): ExternalAgent {
   let publicReplies = user.role === "admin" || !PRIVATE_COMMENT_ROLE_TYPES.has(user.role_type ?? -1);
   const customRole = user.custom_role_id != null ? customRoles?.get(user.custom_role_id) : undefined;
   if (user.role !== "admin" && customRole) publicReplies = customRole.publicComments;
@@ -69,6 +78,9 @@ export function toAgent(user: ZendeskUser, customRoles?: Map<number, CustomRole>
     role: user.role === "end-user" ? "end_user" : user.role,
     active: user.active !== false && user.suspended !== true,
     roleNames: roleNamesOf(user, customRoles),
+    groupExternalIds: memberships.groups ?? [],
+    organizationExternalIds:
+      memberships.organizations ?? (user.organization_id == null ? [] : [String(user.organization_id)]),
     permissions: {
       publicReplies,
       ticketAccess: user.role === "admin" ? "all" : (user.ticket_restriction ?? "all"),
@@ -85,6 +97,8 @@ export function toTicket(ticket: ZendeskTicket, users: Map<number, ZendeskUser>)
     priority: ticket.priority,
     requester: requester ? toCustomer(requester) : null,
     assigneeExternalId: ticket.assignee_id === null ? null : String(ticket.assignee_id),
+    groupExternalId: ticket.group_id == null ? null : String(ticket.group_id),
+    organizationExternalId: ticket.organization_id == null ? null : String(ticket.organization_id),
     createdAt: new Date(ticket.created_at),
     updatedAt: new Date(ticket.updated_at),
     deleted: ticket.status === "deleted",

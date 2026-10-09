@@ -10,6 +10,8 @@ export interface ZendeskTicket {
   priority: ZendeskPriority | null;
   requester_id: number | null;
   assignee_id: number | null;
+  group_id?: number | null;
+  organization_id?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -27,7 +29,18 @@ export interface ZendeskUser {
   custom_role_id?: number | null;
   /** Can moderate help center community content. */
   moderator?: boolean;
+  organization_id?: number | null;
   ticket_restriction?: "organization" | "groups" | "assigned" | "requested" | null;
+}
+
+export interface GroupMembershipsResponse {
+  group_memberships: { user_id: number; group_id: number }[];
+  meta?: { has_more: boolean; after_cursor: string | null };
+}
+
+export interface OrganizationMembershipsResponse {
+  organization_memberships: { user_id: number; organization_id: number }[];
+  meta?: { has_more: boolean; after_cursor: string | null };
 }
 
 export interface CustomRolesResponse {
