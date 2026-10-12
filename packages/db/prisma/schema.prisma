@@ -110,6 +110,8 @@ model Tenant {
   backendAgents BackendAgent[]
   customers     Customer[]
   tickets       Ticket[]
+  ticketForms   TicketForm[]
+  ticketFields  TicketField[]
   webhookEvents WebhookEvent[]
   auditLogs     AuditLog[]
 }
@@ -285,8 +287,8 @@ model Customer {
 model Ticket {
   id                     String          @id @default(cuid())
   tenantId               String
-  /// oneix ticket number, shown in the workspace.
-  number                 Int             @unique @default(autoincrement())
+  /// The backend's ticket number, as agents and customers know it (Zendesk's ticket ID). Unique per tenant.
+  number                 Int
   /// Ticket ID in the ticketing backend.
   externalId             String
   customerId             String?
@@ -299,6 +301,12 @@ model Ticket {
   channel                TicketChannel   @default(other)
   /// The specific source within the channel, for example "WhatsApp".
   channelDetail          String?
+  /// Backend ticket form; null for the default form.
+  formExternalId         String?
+  /// Backend brand, which decides the forms the ticket can use.
+  brandExternalId        String?
+  /// Non-empty custom field values by backend field ID.
+  customFields           Json            @default("{}")
   status                 TicketStatus
   priority               TicketPriority?
   /// Last update time reported by the backend. Older snapshots never overwrite newer ones.
@@ -312,10 +320,62 @@ model Ticket {
   assignee User?     @relation(fields: [assigneeId], references: [id])
 
   @@unique([tenantId, externalId])
+  @@unique([tenantId, number])
   @@index([tenantId, status, assigneeId])
   @@index([tenantId, groupExternalId])
   @@index([tenantId, channel, externalUpdatedAt(sort: Desc)])
   @@index([tenantId, externalUpdatedAt(sort: Desc), id])
+}
+
+/// A backend ticket form: which custom fields a ticket shows, and when. Synced from the backend.
+model TicketForm {
+  id               String   @id @default(cuid())
+  tenantId         String
+  externalId       String
+  name             String
+  position         Int
+  active           Boolean
+  isDefault        Boolean
+  /// Brands that can use the form; empty with inAllBrands for every brand.
+  inAllBrands      Boolean
+  brandExternalIds String[] @default([])
+  /// Every field on the form in order, built-in ones included.
+  fieldExternalIds String[] @default([])
+  /// FormCondition[] from @oneix/contracts.
+  conditions       Json     @default("[]")
+  syncedAt         DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, externalId])
+}
+
+/// A backend custom ticket field. Synced from the backend.
+model TicketField {
+  id          String   @id @default(cuid())
+  tenantId    String
+  externalId  String
+  /// CustomFieldType from @oneix/contracts.
+  type        String
+  title       String
+  description String?
+  position    Int
+  active      Boolean
+  /// Statuses at which the field needs a value on every form.
+  requiredOn  String[] @default([])
+  editable    Boolean  @default(true)
+  /// CustomFieldOption[] from @oneix/contracts.
+  options     Json     @default("[]")
+  pattern     String?
+  syncedAt    DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, externalId])
 }
 
 model WebhookEvent {
