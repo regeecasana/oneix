@@ -11,6 +11,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@oneix/accounts": "*",
     "@oneix/contracts": "*",
     "@oneix/db": "*",
     "@oneix/logger": "*",

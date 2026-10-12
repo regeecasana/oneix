@@ -13,6 +13,7 @@ import {
   type ZendeskCredentials,
   zendeskCredentialsFromEnv,
 } from "@oneix/tenancy";
+import { inviteToTenant, issueLink, suggestedBackendAgent } from "@oneix/accounts";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { z } from "zod";
@@ -33,13 +34,24 @@ Commands
                       Credentials not given as options are read from ZENDESK_* variables,
                       which keeps them out of your shell history.
   list                Show every tenant, its connection status, agents, and cached tickets.
-  sync-agents         Provision agents from Zendesk now.          --slug <slug>
+  sync-agents         Refresh the tenant's Zendesk user directory and linked accounts now.
+                                                                   --slug <slug>
   resync-tickets      Re-import every ticket from Zendesk, for example after oneix starts storing a
                       new ticket field.                            --slug <slug>
   set-webhook-secret  Store the Zendesk webhook signing secret.  --slug <slug> --secret <secret>
   disable / enable    Stop or resume all Zendesk traffic for a tenant.  --slug <slug>
   bootstrap           Development: connect the tenant in DEV_TENANT_SLUG from ZENDESK_* variables,
                       unless it is already connected. Used by npm start.
+
+People (oneix accounts)
+  users               List the tenant's oneix accounts and their Zendesk links.  --slug <slug>
+  invite              Invite someone to a tenant and print their invite link. Their account is
+                      linked to the Zendesk user with the same email, if there is one.
+                        --slug <slug> --email <email> --name <name> [--role agent|admin]
+                        [--zendesk-user <id>]   link to this Zendesk user instead
+  reset-link          Print a password reset link (or a fresh invite link if they never set a
+                      password). There is no email sending yet; send the link yourself.
+                        --email <email>
 `;
 
 const { positionals, values } = parseArgs({
@@ -56,6 +68,8 @@ const { positionals, values } = parseArgs({
     "webhook-secret": { type: "string" },
     secret: { type: "string" },
     impersonate: { type: "boolean" },
+    role: { type: "string" },
+    "zendesk-user": { type: "string" },
   },
 });
 
@@ -70,6 +84,7 @@ const parsedEnv = z
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
     ONEIX_ENCRYPTION_KEY: z.string().min(1),
+    WEB_ORIGIN: z.string().min(1).default("http://localhost:3000"),
   })
   .safeParse(Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== "")));
 if (!parsedEnv.success) {
@@ -110,6 +125,12 @@ async function run(command: string): Promise<void> {
     case "disable":
     case "enable":
       return setEnabled(required("slug"), command === "enable");
+    case "users":
+      return listUsers(required("slug"));
+    case "invite":
+      return invite(required("slug"), required("email"), required("name"));
+    case "reset-link":
+      return resetLink(required("email"));
     default:
       throw new Error(`Unknown command "${command}". Run: npm run tenant -- help`);
   }
@@ -129,9 +150,10 @@ async function add(slug: string, subdomain: string, credentials: ZendeskCredenti
 
   console.log(`✔ Tenant ${result.created ? "created" : "updated"}: ${slug}`);
   console.log(`  Connected as:  ${result.connectedAs.name} <${result.connectedAs.email ?? "no email"}>`);
-  console.log(`  Agents:        ${result.agents.active} active, ${result.agents.deactivated} deactivated, ${result.agents.skipped} skipped`);
+  console.log(`  Directory:     ${result.agents.directory} Zendesk agents and admins, ${result.agents.linked} linked to oneix accounts`);
   console.log(`  Ticket import: queued; the worker imports in the background`);
   console.log(`  Webhook URL:   <api host>/webhooks/zendesk/${slug}/ticket-updated`);
+  console.log(`  Next:          invite people with npm run tenant -- invite --slug ${slug} --email … --name …`);
 }
 
 async function bootstrap(): Promise<void> {
@@ -153,6 +175,15 @@ async function bootstrap(): Promise<void> {
   values.name ??= process.env.DEV_TENANT_NAME || undefined;
   values["webhook-secret"] ??= process.env.ZENDESK_WEBHOOK_SECRET;
   await add(slug, subdomain, credentials);
+
+  // A new tenant has no oneix accounts. The owner of the Zendesk API token becomes its first admin.
+  if (credentials.type === "api_token") {
+    console.log("");
+    values.role = "admin";
+    await invite(slug, credentials.email, credentials.email.split("@")[0] ?? credentials.email);
+  } else {
+    console.log(`\nInvite the first admin: npm run tenant -- invite --slug ${slug} --email … --name … --role admin`);
+  }
 }
 
 async function list(): Promise<void> {
@@ -194,7 +225,7 @@ async function syncAgentsNow(slug: string): Promise<void> {
   const tenantId = await tenantIdOf(prisma, slug);
   const ticketing = await new TicketingRegistry(prisma, secrets).for(tenantId);
   const result = await syncAgents(prisma, tenantId, ticketing);
-  console.log(`✔ ${slug}: ${result.active} active, ${result.deactivated} deactivated, ${result.skipped} skipped`);
+  console.log(`✔ ${slug}: ${result.directory} Zendesk users in the directory, ${result.linked} linked accounts refreshed, ${result.deactivated} lost access`);
 }
 
 async function resyncTickets(slug: string): Promise<void> {
@@ -208,6 +239,76 @@ async function resyncTickets(slug: string): Promise<void> {
   }
   await queueImport(tenantId);
   console.log(`✔ ${slug}: full ticket re-import queued; the worker runs it in the background`);
+}
+
+async function listUsers(slug: string): Promise<void> {
+  const tenantId = await tenantIdOf(prisma, slug);
+  const memberships = await prisma.tenantMembership.findMany({
+    where: { tenantId },
+    select: {
+      role: true,
+      active: true,
+      zendeskUserId: true,
+      roleNames: true,
+      user: { select: { email: true, name: true, status: true, lastLoginAt: true } },
+    },
+    orderBy: { user: { name: "asc" } },
+  });
+  if (memberships.length === 0) {
+    console.log(`No accounts in ${slug} yet. Invite someone: npm run tenant -- invite --slug ${slug} --email … --name …`);
+    return;
+  }
+  console.table(
+    memberships.map((m) => ({
+      name: m.user.name,
+      email: m.user.email,
+      account: m.user.status,
+      access: m.active ? "on" : "off",
+      "oneix role": m.role,
+      zendesk: m.zendeskUserId ? `${m.zendeskUserId} (${m.roleNames.join(", ")})` : "not linked",
+      "last sign-in": m.user.lastLoginAt?.toISOString().slice(0, 16).replace("T", " ") ?? "never",
+    })),
+  );
+}
+
+async function invite(slug: string, email: string, name: string): Promise<void> {
+  const tenantId = await tenantIdOf(prisma, slug);
+  const role = values.role ?? "agent";
+  if (role !== "agent" && role !== "admin") throw new Error("--role must be agent or admin");
+
+  // Operations confirm the link by running the command: an explicit Zendesk user, or the one with this email.
+  const zendeskUserId =
+    values["zendesk-user"] ?? (await suggestedBackendAgent(prisma, tenantId, email))?.externalId ?? null;
+
+  const result = await inviteToTenant(prisma, { tenantId, email, name, role, zendeskUserId });
+  console.log(`✔ ${email} added to ${slug} as ${role}`);
+  console.log(`  Zendesk link:  ${zendeskUserId ? zendeskUserId : "none (link one from the Team page)"}`);
+  if (result.link) {
+    console.log(`  Invite link:   ${env.WEB_ORIGIN}/invite/${result.link.token}`);
+    console.log(`  Expires:       ${result.link.expiresAt.toISOString()}`);
+    console.log("  Send this link to them; it can be used once.");
+  } else {
+    console.log("  They already have a oneix account, so no invite link is needed.");
+  }
+}
+
+async function resetLink(email: string): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { email: email.toLowerCase() },
+    select: { id: true, status: true, memberships: { select: { tenantId: true }, take: 1 } },
+  });
+  if (!user) throw new Error(`No oneix account for ${email}`);
+  if (user.status === "disabled") throw new Error(`${email}'s account is disabled`);
+
+  const neverSetPassword = user.status === "invited";
+  const link = await issueLink(prisma, {
+    userId: user.id,
+    purpose: neverSetPassword ? "invite" : "password_reset",
+    tenantId: user.memberships[0]?.tenantId,
+  });
+  const path = neverSetPassword ? "invite" : "reset-password";
+  console.log(`✔ ${neverSetPassword ? "Invite" : "Password reset"} link for ${email} (expires ${link.expiresAt.toISOString()}):`);
+  console.log(`  ${env.WEB_ORIGIN}/${path}/${link.token}`);
 }
 
 async function setWebhookSecret(slug: string, secret: string): Promise<void> {
@@ -250,7 +351,7 @@ async function tenantIdOf(db: PrismaClient, slug: string): Promise<string> {
   return tenant.id;
 }
 
-function required(option: "slug" | "subdomain" | "webhook-secret"): string {
+function required(option: "slug" | "subdomain" | "webhook-secret" | "email" | "name"): string {
   const value = values[option];
   if (!value) throw new Error(`--${option} is required. Run: npm run tenant -- help`);
   return value;
