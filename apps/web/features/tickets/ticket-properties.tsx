@@ -18,13 +18,14 @@ import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { priorityLabels, statusLabels } from "./labels"
 import { useAgents, useUpdateTicket } from "./queries"
+import { TicketForm } from "./ticket-form"
 
 /** Select items can't have an empty value, so "none" has a name. */
 const NONE = "none"
 
 export function TicketProperties({ ticket, readOnly = false }: { ticket: TicketDetail; readOnly?: boolean }) {
   const agents = useAgents()
-  const update = useUpdateTicket(ticket.id)
+  const update = useUpdateTicket(ticket.number)
   const closed = ticket.status === "closed"
   const disabled = closed || readOnly || update.isPending
 
@@ -114,6 +115,8 @@ export function TicketProperties({ ticket, readOnly = false }: { ticket: TicketD
           {closed && <p className="text-xs text-muted-foreground">Closed tickets can&apos;t be changed.</p>}
         </CardContent>
       </Card>
+
+      <TicketForm ticket={ticket} readOnly={readOnly} />
 
       {ticket.customer && (
         <Card size="sm">

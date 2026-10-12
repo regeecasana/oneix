@@ -8,14 +8,17 @@ import type {
   SortOrder,
   TicketSortField,
   TicketDetail,
+  TicketFormsResponse,
   TicketStatus,
   TicketSummary,
   UpdateTicketRequest,
 } from "@oneix/contracts";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 export interface TicketFilters {
+  /** Text to search for in the subject, number, or customer. */
+  q?: string;
   /** Show only these statuses; empty or undefined for all. */
   status?: TicketStatus[];
   /** Show only these priorities, `none` for tickets without one; empty or undefined for all. */
@@ -26,6 +29,7 @@ export interface TicketFilters {
 
 /** The filters as query parameters, lists comma-separated. */
 function filterParams(filters: TicketFilters, params = new URLSearchParams()): URLSearchParams {
+  if (filters.q) params.set("q", filters.q);
   if (filters.status?.length) params.set("status", filters.status.join(","));
   if (filters.priority?.length) params.set("priority", filters.priority.join(","));
   if (filters.assignee) params.set("assignee", filters.assignee);
@@ -76,7 +80,26 @@ export function useTickets(
   });
 }
 
-export function useTicket(id: string) {
+/** Tickets for a scrolling list: the next page loads as the list reaches its end. */
+export function useTicketList(filters: TicketFilters, channel: TicketChannel | null, pageSize = 30) {
+  return useInfiniteQuery({
+    queryKey: ["tickets", "list", filters, channel, pageSize],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({ page: String(pageParam), pageSize: String(pageSize) });
+      if (channel) params.set("channel", channel);
+      filterParams(filters, params);
+      return api<ListTicketsResponse>(`/tickets?${params}`);
+    },
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.page < last.totalPages ? last.page + 1 : undefined),
+    placeholderData: keepPreviousData,
+    refetchInterval: 30_000,
+  });
+}
+
+/** @param number the ticket number, as in Zendesk and the URL. */
+export function useTicket(number: string | number) {
+  const id = String(number);
   return useQuery({ queryKey: ["ticket", id], queryFn: () => api<TicketDetail>(`/tickets/${id}`) });
 }
 
@@ -88,19 +111,45 @@ export function useAgents() {
   });
 }
 
-export function useUpdateTicket(id: string) {
+/** The forms a ticket of this brand can use, with their fields. Changes rarely, so cached a while. */
+export function useTicketForms(brandId: string | null, formId: string | null) {
+  return useQuery({
+    queryKey: ["ticket-forms", brandId, formId],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (brandId) params.set("brandId", brandId);
+      if (formId) params.set("formId", formId);
+      return api<TicketFormsResponse>(`/ticket-forms?${params}`);
+    },
+    staleTime: 10 * 60_000,
+  });
+}
+
+export function useUpdateTicket(number: number) {
+  const id = String(number);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (changes: UpdateTicketRequest) =>
       api<TicketSummary>(`/tickets/${id}`, { method: "PATCH", body: changes }),
-    onSuccess: (summary) => {
-      queryClient.setQueryData<TicketDetail>(["ticket", id], (old) => (old ? { ...old, ...summary } : old));
+    onSuccess: (summary, changes) => {
+      queryClient.setQueryData<TicketDetail>(["ticket", id], (old) => {
+        if (!old) return old;
+        const customFields = Object.fromEntries(
+          Object.entries({ ...old.customFields, ...changes.customFields }).filter(([, v]) => v !== null),
+        );
+        return { ...old, ...summary, formId: changes.formId ?? old.formId, customFields };
+      });
+      // The summary doesn't carry the form and field values; read them back.
+      if (changes.formId !== undefined || changes.customFields !== undefined) {
+        void queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+      }
       void queryClient.invalidateQueries({ queryKey: ["tickets"] });
     },
   });
 }
 
-export function useAddComment(id: string) {
+export function useAddComment(number: number) {
+  const id = String(number);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (comment: AddCommentRequest) =>
