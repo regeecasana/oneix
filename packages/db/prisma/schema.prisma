@@ -12,6 +12,17 @@ datasource db {
   provider = "postgresql"
 }
 
+enum UserStatus {
+  invited
+  active
+  disabled
+}
+
+enum AuthTokenPurpose {
+  invite
+  password_reset
+}
+
 enum UserRole {
   agent
   admin
@@ -96,6 +107,7 @@ model Tenant {
 
   connections   TenantConnection[]
   memberships   TenantMembership[]
+  backendAgents BackendAgent[]
   customers     Customer[]
   tickets       Ticket[]
   webhookEvents WebhookEvent[]
@@ -128,16 +140,92 @@ model TenantConnection {
 
 /// A person who signs in to oneix. One person can work for several tenants through memberships.
 model User {
-  id         String   @id @default(cuid())
-  email      String   @unique
-  name       String
-  ssoSubject String?  @unique
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                String     @id @default(cuid())
+  email             String     @unique
+  name              String
+  ssoSubject        String?    @unique
+  /// invited until they set a password from their invite link; disabled blocks every sign-in.
+  status            UserStatus @default(invited)
+  /// scrypt hash; null until the invite is accepted.
+  passwordHash      String?
+  passwordChangedAt DateTime?
+  lastLoginAt       DateTime?
+  /// Consecutive failed sign-ins; the account locks for a while after too many.
+  failedLogins      Int        @default(0)
+  lockedUntil       DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   memberships     TenantMembership[]
   assignedTickets Ticket[]
   auditLogs       AuditLog[]
+  sessions        Session[]
+  authTokens      AuthToken[]        @relation("AuthTokenUser")
+}
+
+/// A signed-in browser. The cookie holds a random token; only its hash is stored.
+model Session {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  userId     String
+  /// The workspace the session is working in; switching workspace updates it.
+  tenantId   String
+  expiresAt  DateTime
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+/// One-time links: invitations and password resets. Only the token's hash is stored.
+model AuthToken {
+  id          String           @id @default(cuid())
+  tokenHash   String           @unique
+  purpose     AuthTokenPurpose
+  userId      String
+  /// The workspace an invitation is for.
+  tenantId    String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdById String?
+  createdAt   DateTime         @default(now())
+
+  user User @relation("AuthTokenUser", fields: [userId], references: [id])
+
+  @@index([userId, purpose])
+}
+
+/// A user in a tenant's ticketing backend (Zendesk), refreshed by the agent sync. oneix accounts
+/// are linked to one of these; the directory itself never grants access.
+model BackendAgent {
+  id                      String             @id @default(cuid())
+  tenantId                String
+  provider                ConnectionProvider
+  externalId              String
+  name                    String
+  email                   String?
+  /// The backend's role: agent or admin.
+  role                    UserRole
+  roleNames               String[]           @default([])
+  canReplyPublicly        Boolean            @default(true)
+  ticketAccess            TicketAccess       @default(all)
+  groupExternalIds        String[]           @default([])
+  organizationExternalIds String[]           @default([])
+  /// False when suspended or removed in the backend.
+  active                  Boolean            @default(true)
+  syncedAt                DateTime
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, provider, externalId])
+  @@index([tenantId, email])
 }
 
 /// A user's access to one tenant, with their identities in that tenant's platforms.
@@ -145,9 +233,13 @@ model TenantMembership {
   id                      String       @id @default(cuid())
   tenantId                String
   userId                  String
+  /// oneix role in this workspace: admins manage the team. Independent of the Zendesk role.
   role                    UserRole     @default(agent)
-  /// Agent in this tenant's Zendesk. Set when agents are provisioned from Zendesk.
+  /// The linked user in this tenant's Zendesk (a BackendAgent's externalId). Without a link the
+  /// account can sign in but can't act on tickets. Permissions below are copied from that user.
   zendeskUserId           String?
+  /// When an admin confirmed the Zendesk link.
+  zendeskLinkedAt         DateTime?
   cxoneAgentId            String?
   /// Every role the agent holds in the backend, as it names them: "Light agent", "Moderator".
   roleNames               String[]     @default([])

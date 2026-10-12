@@ -8,6 +8,7 @@ export const TENANT_MODELS = new Set([
   "Ticket",
   "WebhookEvent",
   "AuditLog",
+  "BackendAgent",
 ]);
 
 const WHERE_OPERATIONS = new Set([
