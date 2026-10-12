@@ -4,7 +4,7 @@ import { Check, ChevronsUpDown, Inbox, KeyRound, Link2, LogOut, Moon, Sun, Users
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
-import { type ReactNode, useState } from "react"
+import { type CSSProperties, type ReactNode, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
@@ -23,14 +23,12 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  SidebarRail,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
@@ -38,6 +36,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { ChangePasswordDialog } from "@/features/auth/change-password-dialog"
 import { useLogout, useMe, useSwitchTenant } from "@/features/auth/queries"
 import { RoleBadge } from "@/features/tickets/labels"
+import { TicketListPanel } from "@/features/tickets/ticket-list-panel"
 import { initials } from "@/features/tickets/thread"
 
 const nav = [
@@ -47,7 +46,11 @@ const nav = [
 
 type Me = NonNullable<ReturnType<typeof useMe>["data"]>
 
-/** Workspace shell: a collapsible sidebar with the client workspace, navigation, and the account menu. */
+/**
+ * Workspace shell. The sidebar is an icon rail (client workspace, navigation, account) and, beside
+ * an open ticket, the ticket list with its channel tabs, so agents move between tickets without
+ * leaving the one they're in. The list collapses to leave just the rail.
+ */
 export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   const me = useMe()
   const pathname = usePathname()
@@ -73,42 +76,63 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
 
   const items = nav.filter((item) => !item.adminOnly || me.data.role === "admin")
   const current = items.find((item) => item.matches.some((prefix) => pathname.startsWith(prefix)))
+  // The ticket list sits beside an open ticket; the inbox page has the full table instead.
+  const listPanel = pathname.startsWith("/tickets/")
 
   return (
-    <SidebarProvider>
-      <Sidebar collapsible="icon">
-        <SidebarHeader>
-          <WorkspaceSwitcher me={me.data} />
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {items.map((item) => (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton asChild isActive={item === current} tooltip={item.label}>
-                      <Link href={item.href}>
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-        <SidebarFooter>
-          <AccountMenu me={me.data} />
-        </SidebarFooter>
-        <SidebarRail />
+    <SidebarProvider
+      style={{ "--sidebar-width": listPanel ? "22rem" : "calc(var(--sidebar-width-icon) + 1px)" } as CSSProperties}
+    >
+      <Sidebar collapsible="icon" className="overflow-hidden *:data-[sidebar=sidebar]:flex-row">
+        {/* The rail: always icons only. */}
+        <Sidebar collapsible="none" className="w-[calc(var(--sidebar-width-icon)+1px)]! border-r">
+          <SidebarHeader>
+            <WorkspaceSwitcher me={me.data} />
+          </SidebarHeader>
+          <SidebarContent>
+            <SidebarGroup>
+              <SidebarGroupContent className="px-1.5 md:px-0">
+                <SidebarMenu>
+                  {items.map((item) => (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={item === current}
+                        tooltip={{ children: item.label, hidden: false }}
+                        className="px-2.5 md:px-2"
+                      >
+                        <Link href={item.href}>
+                          <item.icon />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+          <SidebarFooter>
+            <AccountMenu me={me.data} />
+          </SidebarFooter>
+        </Sidebar>
+
+        {listPanel && (
+          <Sidebar collapsible="none" className="hidden min-w-0 flex-1 md:flex">
+            <TicketListPanel />
+          </Sidebar>
+        )}
       </Sidebar>
 
-      <SidebarInset className="min-w-0 bg-muted/30">
-        <header className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
+      {/* Exactly the viewport's height: pages scroll inside, and a page can fill the height instead. */}
+      <SidebarInset className="h-svh min-w-0 overflow-hidden bg-muted/30">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4">
+          {listPanel && (
+            <>
+              <SidebarTrigger className="-ml-1" aria-label="Show or hide the ticket list" />
+              <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
+            </>
+          )}
           <span className="text-sm font-medium">{current?.label}</span>
         </header>
         {!me.data.permissions.linked && (
@@ -120,7 +144,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
             </span>
           </div>
         )}
-        <div className="flex-1">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </SidebarInset>
     </SidebarProvider>
   )
@@ -136,9 +160,9 @@ function WorkspaceSwitcher({ me }: { me: Me }) {
   const button = (
     <SidebarMenuButton
       size="lg"
-      tooltip={me.tenant.name}
+      tooltip={{ children: `oneix · ${me.tenant.name}`, hidden: false }}
       disabled={switchTenant.isPending}
-      className="data-[state=open]:bg-sidebar-accent"
+      className="data-[state=open]:bg-sidebar-accent md:h-8 md:p-0"
       asChild={!several}
     >
       {several ? (
@@ -207,7 +231,11 @@ function AccountMenu({ me }: { me: Me }) {
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <SidebarMenuButton size="lg" tooltip={me.name} className="data-[state=open]:bg-sidebar-accent">
+            <SidebarMenuButton
+              size="lg"
+              tooltip={{ children: me.name, hidden: false }}
+              className="data-[state=open]:bg-sidebar-accent md:h-8 md:p-0"
+            >
               <Avatar className="size-8 rounded-lg">
                 <AvatarFallback className="rounded-lg">{initials(me.name)}</AvatarFallback>
               </Avatar>

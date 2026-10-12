@@ -5,8 +5,6 @@ import { Lock, Send } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -22,9 +20,10 @@ type Mode = "reply" | "note"
 const UNCHANGED = "unchanged"
 
 /**
- * Public reply or internal note. A public reply is sent to the customer by email, so the composer
- * says who will receive it. "Send as" changes the status in the same update.
- * Agents whose role allows internal notes only (light agents) don't get the public reply tab.
+ * Public reply or internal note, docked under the conversation. A public reply is sent to the
+ * customer by email, so the composer says who will receive it. "Send as" changes the status in the
+ * same update. Agents whose role allows internal notes only (light agents) don't get the public
+ * reply tab.
  */
 export function CommentComposer({ ticket }: { ticket: TicketDetail }) {
   const me = useMe()
@@ -33,8 +32,9 @@ export function CommentComposer({ ticket }: { ticket: TicketDetail }) {
   const mode: Mode = canReply ? chosenMode : "note"
   const [body, setBody] = useState("")
   const [status, setStatus] = useState<SettableTicketStatus | typeof UNCHANGED>(UNCHANGED)
-  const addComment = useAddComment(ticket.id)
+  const addComment = useAddComment(ticket.number)
   const recipient = ticket.customer?.name ?? ticket.customer?.email ?? "the customer"
+  const note = mode === "note"
 
   function submit(event?: FormEvent) {
     event?.preventDefault()
@@ -53,65 +53,66 @@ export function CommentComposer({ ticket }: { ticket: TicketDetail }) {
   }
 
   return (
-    <Card className={cn(mode === "note" && "ring-amber-300 dark:ring-amber-500/40")}>
-      <CardContent>
-        <form onSubmit={submit} className="flex flex-col gap-3">
-          <Tabs value={mode} onValueChange={(value) => setMode(value as Mode)}>
-            <TabsList variant="line">
-              {canReply && <TabsTrigger value="reply">Public reply</TabsTrigger>}
-              <TabsTrigger value="note">
-                <Lock data-icon="inline-start" />
-                Internal note
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+    <form
+      onSubmit={submit}
+      className={cn(
+        "flex flex-col rounded-xl bg-card ring-1 ring-border transition-shadow focus-within:ring-2 focus-within:ring-ring/40",
+        note && "bg-amber-50/70 ring-amber-300 focus-within:ring-amber-400 dark:bg-amber-500/5 dark:ring-amber-500/40",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pt-2">
+        <Tabs value={mode} onValueChange={(value) => setMode(value as Mode)}>
+          <TabsList variant="line">
+            {canReply && <TabsTrigger value="reply">Public reply</TabsTrigger>}
+            <TabsTrigger value="note">
+              <Lock data-icon="inline-start" />
+              Internal note
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <span className={cn("text-xs text-muted-foreground", note && "text-amber-700 dark:text-amber-400")}>
+          {mode === "reply"
+            ? `To ${recipient}, by email`
+            : canReply
+              ? "Visible to agents only"
+              : "Visible to agents only. Your role can add internal notes, not public replies."}
+        </span>
+      </div>
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="comment" className={cn("text-xs", mode === "note" && "text-amber-700 dark:text-amber-400")}>
-              {mode === "reply"
-                ? `${recipient} will receive this by email`
-                : canReply
-                  ? "Visible to agents only"
-                  : "Visible to agents only. Your role can add internal notes, not public replies."}
-            </Label>
-            <Textarea
-              id="comment"
-              rows={5}
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit()
-              }}
-              placeholder={mode === "reply" ? "Write your reply…" : "Add a note…"}
-              className={cn("min-h-28", mode === "note" && "bg-amber-50/60 dark:bg-amber-500/5")}
-            />
-          </div>
+      <Textarea
+        id="comment"
+        aria-label={mode === "reply" ? "Reply" : "Internal note"}
+        rows={3}
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit()
+        }}
+        placeholder={mode === "reply" ? "Write your reply…" : "Add a note…"}
+        className="max-h-48 min-h-20 resize-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
+      />
 
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <span className="mr-auto text-xs text-muted-foreground">Ctrl+Enter to send</span>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span>Send as</span>
-              <Select value={status} onValueChange={(value) => setStatus(value as typeof status)}>
-                <SelectTrigger size="sm" aria-label="Status after sending">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={UNCHANGED}>{statusLabels[ticket.status]} (unchanged)</SelectItem>
-                  {SETTABLE_TICKET_STATUSES.filter((s) => s !== ticket.status).map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {statusLabels[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button type="submit" disabled={!body.trim() || addComment.isPending}>
-              {addComment.isPending ? <Spinner data-icon="inline-start" /> : <Send data-icon="inline-start" />}
-              {mode === "reply" ? "Send reply" : "Add note"}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+      <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-3">
+        <span className="mr-auto hidden text-xs text-muted-foreground sm:inline">Ctrl+Enter to send</span>
+        <span className="text-xs text-muted-foreground">Send as</span>
+        <Select value={status} onValueChange={(value) => setStatus(value as typeof status)}>
+          <SelectTrigger size="sm" aria-label="Status after sending">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={UNCHANGED}>{statusLabels[ticket.status]} (unchanged)</SelectItem>
+            {SETTABLE_TICKET_STATUSES.filter((s) => s !== ticket.status).map((s) => (
+              <SelectItem key={s} value={s}>
+                {statusLabels[s]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button type="submit" size="sm" disabled={!body.trim() || addComment.isPending}>
+          {addComment.isPending ? <Spinner data-icon="inline-start" /> : <Send data-icon="inline-start" />}
+          {mode === "reply" ? "Send reply" : "Add note"}
+        </Button>
+      </div>
+    </form>
   )
 }
