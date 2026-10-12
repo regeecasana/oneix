@@ -9,6 +9,8 @@ const schema = z
     REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
     SESSION_SECRET: z.string().min(32),
     AUTH_DEV_LOGIN: z.stringbool().default(false),
+    /** Serves the API reference at /docs and the OpenAPI document at /openapi.json. Defaults to on outside production. */
+    API_DOCS: z.stringbool().optional(),
 
     /** Encrypts tenant credentials at rest. 32 bytes, base64. */
     ONEIX_ENCRYPTION_KEY: z.string().min(1),

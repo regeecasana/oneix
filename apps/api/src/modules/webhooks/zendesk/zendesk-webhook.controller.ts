@@ -12,10 +12,12 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
+import { ApiBody, ApiHeader, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
 import type { PrismaClient } from "@oneix/db";
 import type { TicketingRegistry } from "@oneix/tenancy";
 import type { Request } from "express";
 import { z } from "zod";
+import { ApiErrors } from "../../../common/api-docs.js";
 import { Public } from "../../../common/auth.js";
 import { PRISMA, TICKETING } from "../../../common/providers.module.js";
 import { WebhookIntakeService } from "../webhook-intake.service.js";
@@ -28,6 +30,7 @@ const TicketUpdatedPayload = z.object({
 });
 
 /** Each tenant's Zendesk calls its own URL, signed with that tenant's secret. */
+@ApiTags("Webhooks")
 @Public()
 @Controller("webhooks/zendesk/:tenant")
 export class ZendeskWebhookController {
@@ -39,6 +42,31 @@ export class ZendeskWebhookController {
 
   @Post("ticket-updated")
   @HttpCode(200)
+  @ApiOperation({
+    summary: "Zendesk: a ticket changed",
+    description:
+      "Called by a Zendesk trigger whenever a ticket is created or updated. The event is stored once " +
+      "(duplicates are ignored) and the worker refreshes that ticket. Requests must be signed with the " +
+      "tenant's webhook signing secret.",
+  })
+  @ApiParam({ name: "tenant", description: "The tenant's slug, as given by npm run tenant -- list." })
+  @ApiHeader({ name: "x-zendesk-webhook-signature", required: true, description: "base64 HMAC-SHA256 of timestamp + body." })
+  @ApiHeader({ name: "x-zendesk-webhook-signature-timestamp", required: true })
+  @ApiBody({
+    schema: {
+      type: "object",
+      properties: {
+        ticket_id: { type: "string", example: "1071868" },
+        updated_at: { type: "string", example: "2026-10-12T09:30:00Z" },
+      },
+      required: ["ticket_id", "updated_at"],
+    },
+  })
+  @ApiOkResponse({
+    description: "Received.",
+    schema: { type: "object", properties: { received: { type: "boolean", enum: [true] } } },
+  })
+  @ApiErrors(400, 401, 404, 503)
   async ticketUpdated(
     @Param("tenant") tenantSlug: string,
     @Req() request: RawBodyRequest<Request>,

@@ -10,13 +10,14 @@ import {
   Res,
   UnauthorizedException,
 } from "@nestjs/common";
-import { DevDirectory, DevLoginRequest, type Me, SwitchTenantRequest, type TenantRef } from "@oneix/contracts";
+import { ApiNoContentResponse, ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { DevDirectory, DevLoginRequest, Me, SwitchTenantRequest, type TenantRef } from "@oneix/contracts";
 import type { PrismaClient } from "@oneix/db";
 import type { Response } from "express";
+import { ApiErrors, ApiSession } from "../../common/api-docs.js";
 import { CurrentUser, Public, type SessionUser } from "../../common/auth.js";
 import { PRISMA } from "../../common/providers.module.js";
 import { SESSION_COOKIE, SESSION_TTL_MS, signSession } from "../../common/session.js";
-import { ZodPipe } from "../../common/zod.pipe.js";
 import { APP_CONFIG, type AppConfig } from "../../config/config.js";
 
 const tenantFields = { id: true, slug: true, name: true } as const;
@@ -26,6 +27,7 @@ const tenantFields = { id: true, slug: true, name: true } as const;
  * Development sign-in picks a tenant and an agent, no password. SSO replaces it once the identity
  * provider is chosen.
  */
+@ApiTags("Sign-in")
 @Controller("auth")
 export class AuthController {
   constructor(
@@ -35,6 +37,12 @@ export class AuthController {
 
   @Public()
   @Get("dev-directory")
+  @ApiOperation({
+    summary: "List workspaces and agents for development sign-in",
+    description: "Only when AUTH_DEV_LOGIN is on; otherwise 404. Never available in production.",
+  })
+  @ApiOkResponse({ standardSchema: DevDirectory })
+  @ApiErrors(404)
   async devDirectory(): Promise<DevDirectory> {
     this.assertDevLogin();
     const tenants = await this.prisma.tenant.findMany({
@@ -59,8 +67,14 @@ export class AuthController {
   @Public()
   @Post("dev-login")
   @HttpCode(200)
+  @ApiOperation({
+    summary: "Sign in as an agent (development)",
+    description: "Sets the session cookie for the agent in the given workspace. Only when AUTH_DEV_LOGIN is on.",
+  })
+  @ApiOkResponse({ description: "Signed in; the session cookie is set.", standardSchema: Me })
+  @ApiErrors(400, 401, 404)
   async devLogin(
-    @Body(new ZodPipe(DevLoginRequest)) body: DevLoginRequest,
+    @Body({ schema: DevLoginRequest }) body: DevLoginRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<Me> {
     this.assertDevLogin();
@@ -75,6 +89,9 @@ export class AuthController {
   }
 
   @Get("me")
+  @ApiOperation({ summary: "The signed-in agent", description: "Includes the current workspace, all workspaces they can switch to, their roles, and permissions." })
+  @ApiSession()
+  @ApiOkResponse({ standardSchema: Me })
   current(@CurrentUser() user: SessionUser): Promise<Me> {
     return this.me(user.id, user.tenantId);
   }
@@ -82,9 +99,12 @@ export class AuthController {
   /** Moves the session to another tenant the agent belongs to. */
   @Post("switch-tenant")
   @HttpCode(200)
+  @ApiOperation({ summary: "Switch workspace", description: "Moves the session to another workspace the agent belongs to." })
+  @ApiSession(400, 403)
+  @ApiOkResponse({ standardSchema: Me })
   async switchTenant(
     @CurrentUser() user: SessionUser,
-    @Body(new ZodPipe(SwitchTenantRequest)) body: SwitchTenantRequest,
+    @Body({ schema: SwitchTenantRequest }) body: SwitchTenantRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<Me> {
     const membership = await this.prisma.tenantMembership.findFirst({
@@ -100,6 +120,8 @@ export class AuthController {
   @Public()
   @Post("logout")
   @HttpCode(204)
+  @ApiOperation({ summary: "Sign out", description: "Clears the session cookie." })
+  @ApiNoContentResponse({ description: "Signed out." })
   logout(@Res({ passthrough: true }) response: Response): void {
     response.clearCookie(SESSION_COOKIE, { path: "/" });
   }
