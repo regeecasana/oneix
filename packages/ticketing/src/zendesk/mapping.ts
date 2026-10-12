@@ -1,6 +1,28 @@
-import type { TicketChannel, TicketStatus } from "@oneix/contracts";
-import type { ExternalAgent, ExternalComment, ExternalCustomer, ExternalTicket } from "../provider.js";
-import type { ZendeskComment, ZendeskStatus, ZendeskTicket, ZendeskUser } from "./types.js";
+import {
+  type CustomFieldType,
+  type CustomFieldValues,
+  isEmptyValue,
+  TICKET_STATUSES,
+  type TicketChannel,
+  type TicketStatus,
+} from "@oneix/contracts";
+import type {
+  ExternalAgent,
+  ExternalComment,
+  ExternalCustomer,
+  ExternalTicket,
+  ExternalTicketField,
+  ExternalTicketForm,
+} from "../provider.js";
+import type {
+  ZendeskComment,
+  ZendeskRequiredOnStatuses,
+  ZendeskStatus,
+  ZendeskTicket,
+  ZendeskTicketField,
+  ZendeskTicketForm,
+  ZendeskUser,
+} from "./types.js";
 
 export function fromZendeskStatus(status: ZendeskStatus): TicketStatus {
   switch (status) {
@@ -165,6 +187,7 @@ export function toTicket(ticket: ZendeskTicket, users: Map<number, ZendeskUser>)
   const channel = toChannel(ticket.via?.channel);
   return {
     externalId: String(ticket.id),
+    number: ticket.id,
     subject: ticket.subject || "(no subject)",
     status: fromZendeskStatus(ticket.status),
     priority: ticket.priority,
@@ -174,6 +197,9 @@ export function toTicket(ticket: ZendeskTicket, users: Map<number, ZendeskUser>)
     organizationExternalId: ticket.organization_id == null ? null : String(ticket.organization_id),
     channel: channel.channel,
     channelDetail: channel.detail,
+    formExternalId: ticket.ticket_form_id == null ? null : String(ticket.ticket_form_id),
+    brandExternalId: ticket.brand_id == null ? null : String(ticket.brand_id),
+    customFields: toCustomFieldValues(ticket.custom_fields),
     createdAt: new Date(ticket.created_at),
     updatedAt: new Date(ticket.updated_at),
     deleted: ticket.status === "deleted",
@@ -197,4 +223,83 @@ export function toComment(comment: ZendeskComment, users: Map<number, ZendeskUse
 
 export function indexUsers(users: ZendeskUser[] | undefined): Map<number, ZendeskUser> {
   return new Map((users ?? []).map((user) => [user.id, user]));
+}
+
+/** Non-empty custom field values by field ID. Zendesk returns every field, mostly empty. */
+export function toCustomFieldValues(fields: ZendeskTicket["custom_fields"]): CustomFieldValues {
+  const values: CustomFieldValues = {};
+  for (const field of fields ?? []) {
+    if (!isEmptyValue(field.value)) values[String(field.id)] = field.value;
+  }
+  return values;
+}
+
+/** Zendesk field types oneix shows, by oneix type. Built-in fields are left out. */
+const FIELD_TYPES: Record<string, CustomFieldType> = {
+  text: "text",
+  textarea: "textarea",
+  integer: "integer",
+  decimal: "decimal",
+  date: "date",
+  checkbox: "checkbox",
+  regexp: "regexp",
+  tagger: "dropdown",
+  multiselect: "multiselect",
+  lookup: "lookup",
+  partialcreditcard: "credit_card",
+};
+
+/** A custom ticket field, or null for built-in fields and types oneix doesn't show. */
+export function toTicketField(field: ZendeskTicketField): ExternalTicketField | null {
+  const type = FIELD_TYPES[field.type];
+  if (!type || !field.removable) return null;
+  return {
+    id: String(field.id),
+    type,
+    title: field.title,
+    description: field.agent_description || field.description || null,
+    position: field.position,
+    active: field.active,
+    requiredOn: field.required ? ["solved"] : [],
+    editable: field.agent_can_edit !== false,
+    options: (field.custom_field_options ?? []).map((o) => ({
+      name: o.name,
+      value: o.value,
+      allowSolving: o.allow_solving !== false,
+    })),
+    pattern: field.regexp_for_validation || null,
+  };
+}
+
+/** Statuses a field can be required at; closed tickets can't be changed. */
+const OPEN_STATUSES = TICKET_STATUSES.filter((s) => s !== "closed");
+
+/** When a conditional child field is required. Older forms only say "required", meaning to solve. */
+function requiredOn(isRequired: boolean | undefined, setting: ZendeskRequiredOnStatuses | undefined): TicketStatus[] {
+  if (!setting) return isRequired ? ["solved"] : [];
+  if (setting.type === "ALL_STATUSES") return [...OPEN_STATUSES];
+  if (setting.type === "NO_STATUSES") return [];
+  return (setting.statuses ?? [])
+    .map((s) => fromZendeskStatus(s as ZendeskStatus))
+    .filter((s) => s !== "closed");
+}
+
+export function toTicketForm(form: ZendeskTicketForm): ExternalTicketForm {
+  return {
+    id: String(form.id),
+    name: form.name,
+    position: form.position,
+    isDefault: form.default,
+    active: form.active,
+    brandIds: form.in_all_brands ? null : (form.restricted_brand_ids ?? []).map(String),
+    fieldIds: form.ticket_field_ids.map(String),
+    conditions: (form.agent_conditions ?? []).map((c) => ({
+      parentFieldId: String(c.parent_field_id),
+      value: c.value,
+      children: c.child_fields.map((child) => ({
+        fieldId: String(child.id),
+        requiredOn: requiredOn(child.is_required, child.required_on_statuses),
+      })),
+    })),
+  };
 }

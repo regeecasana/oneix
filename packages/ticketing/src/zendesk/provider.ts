@@ -9,6 +9,8 @@ import type {
   ExternalGroup,
   ExternalCustomer,
   ExternalTicket,
+  ExternalTicketField,
+  ExternalTicketForm,
   ListTicketsFilter,
   NewAgent,
   NewComment,
@@ -25,6 +27,8 @@ import {
   toComment,
   toCustomer,
   toTicket,
+  toTicketField,
+  toTicketForm,
   toZendeskStatus,
 } from "./mapping.js";
 import type {
@@ -35,6 +39,8 @@ import type {
   GroupMembershipsResponse,
   OrganizationMembershipsResponse,
   IncrementalTicketsResponse,
+  TicketFieldsResponse,
+  TicketFormsResponse,
   TicketResponse,
   UserResponse,
   UsersPageResponse,
@@ -186,6 +192,27 @@ export class ZendeskProvider implements TicketingProvider {
     }
   }
 
+  async listTicketForms(): Promise<ExternalTicketForm[]> {
+    const { ticket_forms } = await this.client.request<TicketFormsResponse>("GET", "/api/v2/ticket_forms.json");
+    return ticket_forms.map(toTicketForm);
+  }
+
+  async listTicketFields(): Promise<ExternalTicketField[]> {
+    const fields: ExternalTicketField[] = [];
+    let after: string | undefined;
+    do {
+      const page = await this.client.request<TicketFieldsResponse>("GET", "/api/v2/ticket_fields.json", {
+        query: { "page[size]": 100, "page[after]": after },
+      });
+      for (const field of page.ticket_fields) {
+        const mapped = toTicketField(field);
+        if (mapped) fields.push(mapped);
+      }
+      after = page.meta?.has_more ? (page.meta.after_cursor ?? undefined) : undefined;
+    } while (after);
+    return fields;
+  }
+
   async findOrCreateCustomer(identity: CustomerIdentity): Promise<ExternalCustomer> {
     if (!identity.email && !identity.phone) {
       throw new Error("A customer needs an email or a phone number");
@@ -285,6 +312,13 @@ export class ZendeskProvider implements TicketingProvider {
     if (changes.priority !== undefined) ticket.priority = changes.priority;
     if (changes.assigneeExternalId !== undefined) {
       ticket.assignee_id = changes.assigneeExternalId === null ? null : Number(changes.assigneeExternalId);
+    }
+    if (changes.formExternalId !== undefined) ticket.ticket_form_id = Number(changes.formExternalId);
+    if (changes.customFields !== undefined) {
+      ticket.custom_fields = Object.entries(changes.customFields).map(([fieldId, value]) => ({
+        id: Number(fieldId),
+        value,
+      }));
     }
 
     const response = await this.client.request<TicketResponse>("PUT", `/api/v2/tickets/${id(externalId)}.json`, {

@@ -14,8 +14,62 @@ export interface ZendeskTicket {
   organization_id?: number | null;
   /** How the ticket was created, for example "email", "web", "native_messaging". */
   via?: { channel?: string | null } | null;
+  brand_id?: number | null;
+  ticket_form_id?: number | null;
+  custom_fields?: { id: number; value: ZendeskFieldValue }[];
   created_at: string;
   updated_at: string;
+}
+
+export type ZendeskFieldValue = string | number | boolean | string[] | null;
+
+/** Required-at-status setting of a conditional child field. */
+export interface ZendeskRequiredOnStatuses {
+  type: "ALL_STATUSES" | "SOME_STATUSES" | "NO_STATUSES";
+  statuses?: string[];
+}
+
+export interface ZendeskTicketField {
+  id: number;
+  type: string;
+  title: string;
+  description?: string | null;
+  agent_description?: string | null;
+  position: number;
+  active: boolean;
+  /** Required to solve, for agents. */
+  required: boolean;
+  /** False when agents may only view the field. */
+  agent_can_edit?: boolean;
+  /** False for built-in fields such as subject and status. */
+  removable: boolean;
+  regexp_for_validation?: string | null;
+  custom_field_options?: { name: string; value: string; allow_solving?: boolean }[];
+}
+
+export interface TicketFieldsResponse {
+  ticket_fields: ZendeskTicketField[];
+  meta?: { has_more: boolean; after_cursor: string | null };
+}
+
+export interface ZendeskTicketForm {
+  id: number;
+  name: string;
+  position: number;
+  active: boolean;
+  default: boolean;
+  in_all_brands: boolean;
+  restricted_brand_ids?: number[];
+  ticket_field_ids: number[];
+  agent_conditions?: {
+    parent_field_id: number;
+    value: string | boolean;
+    child_fields: { id: number; is_required?: boolean; required_on_statuses?: ZendeskRequiredOnStatuses }[];
+  }[];
+}
+
+export interface TicketFormsResponse {
+  ticket_forms: ZendeskTicketForm[];
 }
 
 export interface ZendeskUser {

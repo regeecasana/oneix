@@ -1,4 +1,11 @@
-import type { TicketChannel, TicketPriority, TicketStatus } from "@oneix/contracts";
+import type {
+  CustomFieldDefinition,
+  CustomFieldValues,
+  TicketChannel,
+  TicketFormDefinition,
+  TicketPriority,
+  TicketStatus,
+} from "@oneix/contracts";
 
 /**
  * The only way oneix talks to a ticketing backend.
@@ -18,6 +25,10 @@ export interface TicketingProvider {
    * through oneix. Fails if the email belongs to an existing user or the plan has no free seat.
    */
   createAgent(input: NewAgent): Promise<ExternalAgent>;
+  /** Every ticket form, including inactive ones. */
+  listTicketForms(): Promise<ExternalTicketForm[]>;
+  /** Every custom ticket field oneix can show. Built-in fields such as status are left out. */
+  listTicketFields(): Promise<ExternalTicketField[]>;
   findOrCreateCustomer(identity: CustomerIdentity): Promise<ExternalCustomer>;
   createTicket(input: CreateTicketInput, actor?: Actor): Promise<ExternalTicket>;
   /** Returns null when the ticket does not exist. */
@@ -86,6 +97,17 @@ export interface NewAgent {
   groupExternalIds: string[];
 }
 
+/** A ticket form; IDs are backend IDs. `fieldIds` lists every field on the form, built-in ones too. */
+export interface ExternalTicketForm extends TicketFormDefinition {
+  position: number;
+}
+
+/** A custom ticket field; IDs are backend IDs. */
+export interface ExternalTicketField extends CustomFieldDefinition {
+  position: number;
+  active: boolean;
+}
+
 export interface CustomerIdentity {
   name?: string;
   email?: string;
@@ -102,6 +124,8 @@ export interface ExternalCustomer {
 
 export interface ExternalTicket {
   externalId: string;
+  /** The number agents and customers know the ticket by; in Zendesk, the ticket ID. */
+  number: number;
   subject: string;
   status: TicketStatus;
   priority: TicketPriority | null;
@@ -114,6 +138,11 @@ export interface ExternalTicket {
   channel: TicketChannel;
   /** The specific source within the channel, readable, for example "WhatsApp". */
   channelDetail: string | null;
+  /** The ticket form; null when the ticket uses the default. */
+  formExternalId: string | null;
+  brandExternalId: string | null;
+  /** Custom field values by field ID, empty ones left out. */
+  customFields: CustomFieldValues;
   createdAt: Date;
   updatedAt: Date;
   deleted: boolean;
@@ -149,6 +178,9 @@ export interface TicketChanges {
   status?: TicketStatus;
   priority?: TicketPriority | null;
   assigneeExternalId?: string | null;
+  formExternalId?: string;
+  /** Values to change by field ID; null clears a field. */
+  customFields?: CustomFieldValues;
 }
 
 export interface ListTicketsFilter {

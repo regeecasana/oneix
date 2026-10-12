@@ -75,6 +75,7 @@ describe("ZendeskProvider", () => {
 
     expect(result).toEqual({
       externalId: "1001",
+      number: 1001,
       subject: "Broken invoice",
       status: "on_hold",
       priority: "high",
@@ -84,6 +85,9 @@ describe("ZendeskProvider", () => {
       organizationExternalId: null,
       channel: "other",
       channelDetail: null,
+      formExternalId: null,
+      brandExternalId: null,
+      customFields: {},
       createdAt: new Date("2026-10-01T10:00:00Z"),
       updatedAt: new Date("2026-10-02T10:00:00Z"),
       deleted: false,
@@ -101,6 +105,146 @@ describe("ZendeskProvider", () => {
     const { zendesk, calls } = provider({});
     await expect(zendesk.getTicket("../users")).rejects.toThrow("Invalid ticket ID");
     expect(calls).toHaveLength(0);
+  });
+
+  it("reads the ticket's form, brand, and non-empty custom field values", async () => {
+    const { zendesk } = provider({
+      "GET /api/v2/tickets/1001.json": () =>
+        json({
+          ticket: {
+            ...ticket,
+            ticket_form_id: 500,
+            brand_id: 7,
+            custom_fields: [
+              { id: 1, value: "phones" },
+              { id: 2, value: null },
+              { id: 3, value: false },
+              { id: 4, value: [] },
+              { id: 5, value: ["a", "b"] },
+              { id: 6, value: true },
+            ],
+          },
+          users: [customer],
+        }),
+    });
+
+    const result = await zendesk.getTicket("1001");
+
+    expect(result?.formExternalId).toBe("500");
+    expect(result?.brandExternalId).toBe("7");
+    expect(result?.customFields).toEqual({ "1": "phones", "5": ["a", "b"], "6": true });
+  });
+
+  it("changes the form and custom fields in one update", async () => {
+    const { zendesk, calls } = provider({
+      "PUT /api/v2/tickets/1001.json": () => json({ ticket }),
+    });
+
+    await zendesk.updateTicket("1001", { formExternalId: "500", customFields: { "1": "phones", "2": null } });
+
+    expect(putOf(calls)?.body).toEqual({
+      ticket: {
+        ticket_form_id: 500,
+        custom_fields: [
+          { id: 1, value: "phones" },
+          { id: 2, value: null },
+        ],
+      },
+    });
+  });
+
+  it("reads custom fields across pages, leaving out built-in fields", async () => {
+    const { zendesk } = provider({
+      "GET /api/v2/ticket_fields.json": (call) =>
+        call.url.searchParams.get("page[after]")
+          ? json({
+              ticket_fields: [
+                { id: 3, type: "partialcreditcard", title: "Card", position: 3, active: true, required: false, removable: true },
+              ],
+              meta: { has_more: false, after_cursor: null },
+            })
+          : json({
+              ticket_fields: [
+                { id: 1, type: "status", title: "Status", position: 0, active: true, required: false, removable: false },
+                {
+                  id: 2,
+                  type: "tagger",
+                  title: "Category",
+                  agent_description: "What it's about",
+                  position: 1,
+                  active: true,
+                  required: true,
+                  agent_can_edit: false,
+                  removable: true,
+                  custom_field_options: [
+                    { name: "Refund::Pending", value: "refund_pending", allow_solving: false },
+                    { name: "Other", value: "other" },
+                  ],
+                },
+              ],
+              meta: { has_more: true, after_cursor: "next" },
+            }),
+    });
+
+    const fields = await zendesk.listTicketFields();
+
+    expect(fields.map((f) => [f.id, f.type])).toEqual([
+      ["2", "dropdown"],
+      ["3", "credit_card"],
+    ]);
+    expect(fields[0]).toMatchObject({
+      description: "What it's about",
+      requiredOn: ["solved"],
+      editable: false,
+      options: [
+        { name: "Refund::Pending", value: "refund_pending", allowSolving: false },
+        { name: "Other", value: "other", allowSolving: true },
+      ],
+    });
+  });
+
+  it("reads forms with their brands and when conditional fields are required", async () => {
+    const { zendesk } = provider({
+      "GET /api/v2/ticket_forms.json": () =>
+        json({
+          ticket_forms: [
+            {
+              id: 500,
+              name: "Support",
+              position: 1,
+              active: true,
+              default: false,
+              in_all_brands: false,
+              restricted_brand_ids: [7],
+              ticket_field_ids: [1, 2, 3],
+              agent_conditions: [
+                {
+                  parent_field_id: 2,
+                  value: "incident",
+                  child_fields: [
+                    { id: 3, required_on_statuses: { type: "SOME_STATUSES", statuses: ["pending", "hold"] } },
+                    { id: 4, required_on_statuses: { type: "ALL_STATUSES" } },
+                    { id: 5, is_required: true },
+                    { id: 6, required_on_statuses: { type: "NO_STATUSES" } },
+                  ],
+                },
+              ],
+            },
+            { id: 501, name: "Everyone", position: 0, active: true, default: true, in_all_brands: true, ticket_field_ids: [] },
+          ],
+        }),
+    });
+
+    const [support, everyone] = await zendesk.listTicketForms();
+
+    expect(support).toMatchObject({ id: "500", brandIds: ["7"], fieldIds: ["1", "2", "3"], isDefault: false });
+    expect(support?.conditions[0]?.children).toEqual([
+      { fieldId: "3", requiredOn: ["pending", "on_hold"] },
+      { fieldId: "4", requiredOn: ["new", "open", "pending", "on_hold", "solved"] },
+      { fieldId: "5", requiredOn: ["solved"] },
+      { fieldId: "6", requiredOn: [] },
+    ]);
+    expect(everyone).toMatchObject({ brandIds: null, isDefault: true, conditions: [] });
   });
 
   it("sends status in the backend's vocabulary and loads the requester", async () => {
