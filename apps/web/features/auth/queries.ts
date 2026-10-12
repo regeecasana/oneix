@@ -1,4 +1,12 @@
-import type { DevDirectory, Me } from "@oneix/contracts";
+import type {
+  AcceptInviteRequest,
+  ChangePasswordRequest,
+  DevDirectory,
+  LinkDetails,
+  LoginRequest,
+  Me,
+  ResetPasswordRequest,
+} from "@oneix/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
@@ -43,5 +51,54 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => api<void>("/auth/logout", { method: "POST" }),
     onSuccess: () => queryClient.clear(),
+  });
+}
+
+/** After signing in, nothing cached belongs to the new session except who they are. */
+function useSignedIn() {
+  const queryClient = useQueryClient();
+  return (me: Me) => {
+    queryClient.clear();
+    queryClient.setQueryData(["me"], me);
+  };
+}
+
+export function useLogin() {
+  const signedIn = useSignedIn();
+  return useMutation({
+    mutationFn: (login: LoginRequest) => api<Me>("/auth/login", { method: "POST", body: login }),
+    onSuccess: signedIn,
+  });
+}
+
+/** What an invite or reset link is for; fails when it expired or was used. */
+export function useLinkDetails(token: string) {
+  return useQuery({
+    queryKey: ["auth-link", token],
+    queryFn: () => api<LinkDetails>(`/auth/links/${encodeURIComponent(token)}`),
+    retry: false,
+    staleTime: Infinity,
+  });
+}
+
+export function useAcceptInvite() {
+  const signedIn = useSignedIn();
+  return useMutation({
+    mutationFn: (input: AcceptInviteRequest) => api<Me>("/auth/invites/accept", { method: "POST", body: input }),
+    onSuccess: signedIn,
+  });
+}
+
+export function useResetPassword() {
+  const signedIn = useSignedIn();
+  return useMutation({
+    mutationFn: (input: ResetPasswordRequest) => api<Me>("/auth/password-reset", { method: "POST", body: input }),
+    onSuccess: signedIn,
+  });
+}
+
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (input: ChangePasswordRequest) => api<void>("/auth/password", { method: "POST", body: input }),
   });
 }

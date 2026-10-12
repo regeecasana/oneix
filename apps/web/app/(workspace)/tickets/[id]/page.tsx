@@ -3,6 +3,7 @@
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { useMe } from "@/features/auth/queries"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -16,6 +17,9 @@ import { TicketProperties } from "@/features/tickets/ticket-properties"
 export default function TicketPage() {
   const { id } = useParams<{ id: string }>()
   const ticket = useTicket(id)
+  const me = useMe()
+  // Accounts not linked to a Zendesk user can read but not act.
+  const canAct = me.data?.permissions.linked ?? false
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4 px-6 py-6">
@@ -53,9 +57,9 @@ export default function TicketPage() {
           <div className="grid gap-6 lg:grid-cols-[1fr_18rem]">
             <section className="flex min-w-0 flex-col gap-6">
               <Thread entries={ticket.data.thread} />
-              {ticket.data.status !== "closed" && <CommentComposer ticket={ticket.data} />}
+              {ticket.data.status !== "closed" && canAct && <CommentComposer ticket={ticket.data} />}
             </section>
-            <TicketProperties ticket={ticket.data} />
+            <TicketProperties ticket={ticket.data} readOnly={!canAct} />
           </div>
         </>
       )}

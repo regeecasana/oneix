@@ -1,10 +1,10 @@
 "use client"
 
-import { Inbox, LogOut, Moon, Sun } from "lucide-react"
+import { Inbox, KeyRound, Link2, LogOut, Moon, Sun, Users } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -20,12 +20,16 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { ChangePasswordDialog } from "@/features/auth/change-password-dialog"
 import { useLogout, useMe, useSwitchTenant } from "@/features/auth/queries"
 import { RoleBadge } from "@/features/tickets/labels"
 import { initials } from "@/features/tickets/thread"
 import { cn } from "@/lib/utils"
 
-const nav = [{ href: "/inbox", label: "Inbox", icon: Inbox, matches: ["/inbox", "/tickets"] }]
+const nav = [
+  { href: "/inbox", label: "Inbox", icon: Inbox, matches: ["/inbox", "/tickets"], adminOnly: false },
+  { href: "/team", label: "Team", icon: Users, matches: ["/team"], adminOnly: true },
+]
 
 /** Workspace shell. Agent state and the softphone dock join the header in later milestones. */
 export default function WorkspaceLayout({ children }: { children: ReactNode }) {
@@ -35,6 +39,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
   const { resolvedTheme, setTheme } = useTheme()
+  const [changingPassword, setChangingPassword] = useState(false)
 
   if (me.isPending) {
     return (
@@ -86,7 +91,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
           )}
 
           <nav className="flex gap-1">
-            {nav.map((item) => {
+            {nav.filter((item) => !item.adminOnly || me.data.role === "admin").map((item) => {
               const active = item.matches.some((prefix) => pathname.startsWith(prefix))
               return (
                 <Button key={item.href} asChild variant="ghost" size="sm" className={cn(active && "bg-muted")}>
@@ -120,6 +125,10 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={() => setChangingPassword(true)}>
+                  <KeyRound />
+                  Change password
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>
                   {resolvedTheme === "dark" ? <Sun /> : <Moon />}
                   {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
@@ -136,7 +145,17 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
           </DropdownMenu>
         </div>
       </header>
+      {!me.data.permissions.linked && (
+        <div className="border-b bg-amber-50 px-6 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+          <span className="mx-auto flex max-w-7xl items-center gap-2">
+            <Link2 className="size-4 shrink-0" aria-hidden />
+            Your account isn&apos;t linked to a Zendesk user yet, so you can read tickets but not reply or change them. Ask a
+            workspace admin to link it.
+          </span>
+        </div>
+      )}
       <main className="flex-1">{children}</main>
+      <ChangePasswordDialog open={changingPassword} onOpenChange={setChangingPassword} />
     </div>
   )
 }

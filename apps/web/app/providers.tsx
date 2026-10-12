@@ -25,6 +25,9 @@ export function Providers({ children }: { children: ReactNode }) {
   )
 }
 
+/** Pages anyone can open; a 401 there is part of the page, not a reason to go to sign-in. */
+const PUBLIC_PATHS = ["/login", "/invite/", "/reset-password/"]
+
 /** Any request that comes back 401 sends the agent to sign in. */
 function SignInOnUnauthorized({ client }: { client: QueryClient }) {
   const router = useRouter()
@@ -32,7 +35,8 @@ function SignInOnUnauthorized({ client }: { client: QueryClient }) {
 
   useEffect(() => {
     const onError = (error: unknown) => {
-      if (error instanceof ApiError && error.status === 401 && pathname !== "/login") router.replace("/login")
+      const onPublicPage = PUBLIC_PATHS.some((path) => pathname.startsWith(path))
+      if (error instanceof ApiError && error.status === 401 && !onPublicPage) router.replace("/login")
     }
     const unsubscribeQueries = client.getQueryCache().subscribe((event) => {
       if (event.type === "updated" && event.action.type === "error") onError(event.action.error)

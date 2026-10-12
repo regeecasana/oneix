@@ -22,11 +22,11 @@ import { useAgents, useUpdateTicket } from "./queries"
 /** Select items can't have an empty value, so "none" has a name. */
 const NONE = "none"
 
-export function TicketProperties({ ticket }: { ticket: TicketDetail }) {
+export function TicketProperties({ ticket, readOnly = false }: { ticket: TicketDetail; readOnly?: boolean }) {
   const agents = useAgents()
   const update = useUpdateTicket(ticket.id)
   const closed = ticket.status === "closed"
-  const disabled = closed || update.isPending
+  const disabled = closed || readOnly || update.isPending
 
   function save(changes: UpdateTicketRequest) {
     update.mutate(changes, { onError: (error) => toast.error(error.message) })
