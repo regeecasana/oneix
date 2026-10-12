@@ -10,7 +10,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table"
 import { ArrowDown, ArrowUp, ChevronsUpDown, ListFilter, X } from "lucide-react"
-import type { ReactNode } from "react"
+import type { ReactNode, Ref } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -40,6 +40,13 @@ interface DataTableProps<TData> {
   loadingRows?: number
   /** Shown under the header when there are no rows. */
   empty?: ReactNode
+  /**
+   * Fills its parent's height and scrolls the rows inside, keeping the header in view.
+   * The parent is a flex column with a bounded height, such as a Card that fills the page.
+   */
+  fill?: boolean
+  /** The scrolling element, for example to scroll back to the top on a new page. */
+  scrollRef?: Ref<HTMLDivElement>
 }
 
 /**
@@ -58,6 +65,8 @@ export function DataTable<TData>({
   isLoading = false,
   loadingRows = 8,
   empty,
+  fill = false,
+  scrollRef,
 }: DataTableProps<TData>) {
   // The TanStack table instance is not memoizable by the React Compiler; that is expected here.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -81,8 +90,13 @@ export function DataTable<TData>({
   const minWidth = fixedWidth + flexibleColumns * MIN_FLEXIBLE_COLUMN_WIDTH
 
   return (
-    <Table className="table-fixed" style={{ minWidth }}>
-      <TableHeader>
+    <Table
+      className="table-fixed"
+      style={{ minWidth }}
+      containerRef={scrollRef}
+      containerClassName={cn(fill && "min-h-0 flex-1 overflow-auto")}
+    >
+      <TableHeader className={cn(fill && "sticky top-0 z-10 bg-card shadow-[inset_0_-1px_0_var(--border)]")}>
         {table.getHeaderGroups().map((group) => (
           <TableRow key={group.id}>
             {group.headers.map((header) => {

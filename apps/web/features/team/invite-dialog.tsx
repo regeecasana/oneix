@@ -1,7 +1,7 @@
 "use client"
 
 import type { OneTimeLinkResponse, UserRole } from "@oneix/contracts"
-import { ChevronDown, UserPlus } from "lucide-react"
+import { ChevronDown, UserPlus, UserRoundPlus } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { toast } from "sonner"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -33,13 +33,22 @@ import { CREATE_NEW, ZendeskUserSelect } from "./zendesk-user-select"
  * Invites someone to the workspace: their oneix role and the Zendesk user their account acts as.
  * That's an existing Zendesk user (picking one fills in the name and email), a new Zendesk agent
  * created now, or none for later.
+ *
+ * @param createAgent opens as "Create agent", with a new Zendesk agent already chosen.
  */
-export function InviteDialog({ onInvited }: { onInvited: (link: OneTimeLinkResponse | null, name: string) => void }) {
+export function InviteDialog({
+  onInvited,
+  createAgent = false,
+}: {
+  onInvited: (link: OneTimeLinkResponse | null, name: string) => void
+  createAgent?: boolean
+}) {
+  const initialZendeskUser = createAgent ? CREATE_NEW : null
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState("")
   const [name, setName] = useState("")
   const [role, setRole] = useState<UserRole>("agent")
-  const [zendeskUser, setZendeskUser] = useState<string | null>(null)
+  const [zendeskUser, setZendeskUser] = useState<string | null>(initialZendeskUser)
   const [zendeskRole, setZendeskRole] = useState<string | null>(null)
   const [groupIds, setGroupIds] = useState<string[]>([])
   const creating = zendeskUser === CREATE_NEW
@@ -60,7 +69,7 @@ export function InviteDialog({ onInvited }: { onInvited: (link: OneTimeLinkRespo
     setEmail("")
     setName("")
     setRole("agent")
-    setZendeskUser(null)
+    setZendeskUser(initialZendeskUser)
     setZendeskRole(null)
     setGroupIds([])
     invite.reset()
@@ -102,15 +111,22 @@ export function InviteDialog({ onInvited }: { onInvited: (link: OneTimeLinkRespo
       }}
     >
       <DialogTrigger asChild>
-        <Button>
-          <UserPlus data-icon="inline-start" />
-          Invite person
-        </Button>
+        {createAgent ? (
+          <Button variant="outline">
+            <UserRoundPlus data-icon="inline-start" />
+            Create agent
+          </Button>
+        ) : (
+          <Button>
+            <UserPlus data-icon="inline-start" />
+            Invite person
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
-            <DialogTitle>Invite someone to this workspace</DialogTitle>
+            <DialogTitle>{createAgent ? "Create an agent" : "Invite someone to this workspace"}</DialogTitle>
             <DialogDescription>
               They get a oneix account of their own, linked to a Zendesk user so their replies and changes are written as
               them, with their Zendesk permissions.

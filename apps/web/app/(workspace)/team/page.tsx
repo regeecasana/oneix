@@ -70,7 +70,8 @@ export default function TeamPage() {
   const unlinked = members.filter((m) => m.active && !m.linkedTo).length
 
   return (
-    <div className="mx-auto flex flex-col gap-4 px-6 py-6">
+    // Fills the screen; only the table's rows scroll.
+    <div className="flex h-full flex-col gap-4 px-6 py-6">
       <div className="flex flex-wrap items-center gap-3">
         <div className="mr-auto">
           <h1 className="text-lg font-semibold">Team</h1>
@@ -78,7 +79,10 @@ export default function TeamPage() {
             Who can sign in to this workspace, their oneix role, and the Zendesk user each account acts as.
           </p>
         </div>
-        <InviteDialog onInvited={(link, name) => link && setShownLink({ link, name })} />
+        <div className="flex gap-2">
+          <InviteDialog createAgent onInvited={(link, name) => link && setShownLink({ link, name })} />
+          <InviteDialog onInvited={(link, name) => link && setShownLink({ link, name })} />
+        </div>
       </div>
 
       {unlinked > 0 && (
@@ -93,9 +97,9 @@ export default function TeamPage() {
         </Alert>
       )}
 
-      <Card className="py-0">
-        <Table className="table-fixed" style={{ minWidth: 1100 }}>
-          <TableHeader>
+      <Card className="min-h-0 py-0">
+        <Table className="table-fixed" style={{ minWidth: 1100 }} containerClassName="min-h-0 flex-1 overflow-auto">
+          <TableHeader className="sticky top-0 z-10 bg-card shadow-[inset_0_-1px_0_var(--border)]">
             <TableRow>
               <TableHead className="pl-4">Person</TableHead>
               <TableHead style={{ width: 110 }}>Account</TableHead>

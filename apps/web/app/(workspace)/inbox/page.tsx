@@ -4,7 +4,7 @@ import { PAGE_SIZES, type TicketChannel, type TicketSortField } from "@oneix/con
 import type { OnChangeFn, SortingState } from "@tanstack/react-table"
 import { ChevronDown, Inbox, Layers } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { DataTable } from "@/components/data-table"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -45,6 +45,7 @@ export default function InboxPage() {
   const [filters, setFiltersState] = useState<TicketFilters>({})
   const [channel, setChannelState] = useState<TicketChannel | typeof ALL>(ALL)
   const [page, setPage] = useState(1)
+  const tableScroll = useRef<HTMLDivElement>(null)
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0])
   // One column at a time; empty means the server's default (most recently updated first).
   const [sorting, setSortingState] = useState<SortingState>([])
@@ -87,7 +88,8 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="mx-auto flex flex-col gap-4 px-6 py-6">
+    // Fills the screen; only the table's rows scroll.
+    <div className="flex h-full flex-col gap-4 px-6 py-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="mr-auto text-lg font-semibold">Inbox</h1>
         <Select
@@ -107,7 +109,7 @@ export default function InboxPage() {
         </Select>
       </div>
 
-      <Tabs value={channel} onValueChange={setChannel} className="gap-4">
+      <Tabs value={channel} onValueChange={setChannel} className="min-h-0 flex-1 gap-4">
         <div className="flex flex-wrap items-center gap-2">
           <TabsList aria-label="Channel">
             <TabsTrigger value={ALL}>
@@ -157,22 +159,24 @@ export default function InboxPage() {
         </div>
 
         {/* One panel: the list for whichever tab is open. */}
-        <TabsContent value={channel} className="flex flex-col gap-4">
+        <TabsContent value={channel} className="flex min-h-0 flex-col gap-4">
           {tickets.isError && (
             <Alert variant="destructive">
               <AlertDescription>{tickets.error.message}</AlertDescription>
             </Alert>
           )}
 
-          <Card className={cn("py-0", tickets.isPlaceholderData && "opacity-60")}>
+          <Card className={cn("min-h-0 flex-1 py-0", tickets.isPlaceholderData && "opacity-60")}>
             <DataTable
               columns={ticketColumns(filters, setFilters)}
               data={rows}
               getRowId={(ticket) => ticket.id}
               sorting={sorting}
               onSortingChange={setSorting}
-              onRowClick={(ticket) => router.push(`/tickets/${ticket.id}`)}
+              onRowClick={(ticket) => router.push(`/tickets/${ticket.number}`)}
               isLoading={tickets.isPending}
+              fill
+              scrollRef={tableScroll}
               empty={
                 <Empty>
                   <EmptyHeader>
@@ -197,7 +201,7 @@ export default function InboxPage() {
               totalPages={tickets.data.totalPages}
               onPageChange={(next) => {
                 setPage(next)
-                window.scrollTo({ top: 0 })
+                tableScroll.current?.scrollTo({ top: 0 })
               }}
               onPageSizeChange={(size) => {
                 setPageSize(size)
