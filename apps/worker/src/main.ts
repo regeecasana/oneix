@@ -47,6 +47,7 @@ for (const worker of workers) {
 await scheduleTenantSync(ticketSyncQueue, {
   backfillMinutes: config.TICKET_BACKFILL_INTERVAL_MINUTES,
   agentsMinutes: config.AGENT_SYNC_INTERVAL_MINUTES,
+  formsMinutes: config.TICKET_FORM_SYNC_INTERVAL_MINUTES,
 });
 
 logger.info({ queues: workers.map((w) => w.name) }, "worker started");

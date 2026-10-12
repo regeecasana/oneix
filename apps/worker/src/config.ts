@@ -7,6 +7,7 @@ const schema = z.object({
   ONEIX_ENCRYPTION_KEY: z.string().min(1),
   TICKET_BACKFILL_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(5),
   AGENT_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(60),
+  TICKET_FORM_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(60),
 });
 
 export type WorkerConfig = z.infer<typeof schema>;

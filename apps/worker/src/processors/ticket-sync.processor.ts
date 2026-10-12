@@ -3,11 +3,18 @@ import {
   type FanOutJob,
   TICKET_SYNC_JOBS,
   type TicketBackfillJob,
+  type TicketFormSyncJob,
   type TicketSyncOneJob,
 } from "@oneix/contracts";
 import { cacheTicketSnapshot, type CacheResult, type PrismaClient } from "@oneix/db";
 import type { Logger } from "@oneix/logger";
-import { type AgentSyncResult, syncAgents, type TicketingRegistry } from "@oneix/tenancy";
+import {
+  type AgentSyncResult,
+  syncAgents,
+  syncTicketForms,
+  type TicketFormSyncResult,
+  type TicketingRegistry,
+} from "@oneix/tenancy";
 import { TicketingError } from "@oneix/ticketing";
 import type { Job, Queue } from "bullmq";
 
@@ -72,7 +79,13 @@ export async function provisionAgents(deps: SyncDeps, tenantId: string): Promise
   return result;
 }
 
-/** Queues a backfill or agent sync for every tenant with a usable connection. */
+export async function provisionTicketForms(deps: SyncDeps, tenantId: string): Promise<TicketFormSyncResult> {
+  const result = await syncTicketForms(deps.prisma, tenantId, await deps.registry.for(tenantId));
+  deps.logger.info({ tenantId, ...result }, "ticket form sync finished");
+  return result;
+}
+
+/** Queues a backfill, agent sync, or form sync for every tenant with a usable connection. */
 export async function fanOut(deps: SyncDeps, job: FanOutJob["job"]): Promise<{ tenants: number }> {
   const connections = await deps.prisma.tenantConnection.findMany({
     where: { provider: "zendesk", status: { not: "disabled" } },
@@ -122,6 +135,10 @@ export function ticketSyncProcessor(deps: SyncDeps) {
       case TICKET_SYNC_JOBS.agents: {
         const { tenantId } = job.data as AgentSyncJob;
         return withStatus(deps, tenantId, () => provisionAgents(deps, tenantId));
+      }
+      case TICKET_SYNC_JOBS.forms: {
+        const { tenantId } = job.data as TicketFormSyncJob;
+        return withStatus(deps, tenantId, () => provisionTicketForms(deps, tenantId));
       }
       case TICKET_SYNC_JOBS.fanOut:
         return fanOut(deps, (job.data as FanOutJob).job);

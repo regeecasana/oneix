@@ -3,6 +3,7 @@ import { ZendeskProvider } from "@oneix/ticketing";
 import { authTypeOf, type ZendeskCredentials, zendeskConfig } from "./credentials.js";
 import { type AgentSyncResult, syncAgents } from "./provisioning.js";
 import type { SecretBox } from "./secret-box.js";
+import { type TicketFormSyncResult, syncTicketForms } from "./ticket-forms.js";
 
 export interface ConnectTenantInput {
   /** URL-safe tenant name, used in webhook URLs and sign-in. */
@@ -20,6 +21,7 @@ export interface ConnectTenantResult {
   created: boolean;
   connectedAs: { name: string; email: string | null };
   agents: AgentSyncResult;
+  ticketForms: TicketFormSyncResult;
 }
 
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/;
@@ -29,7 +31,7 @@ const SUBDOMAIN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
  * Creates or updates a tenant and its Zendesk connection.
  *
  * The credentials are checked first: they must work and belong to a Zendesk admin, because the
- * backfill and agent sync need admin access. Then the agents are provisioned. Safe to run again,
+ * backfill and agent sync need admin access. Then the agents and ticket forms are synced. Safe to run again,
  * for example to rotate credentials.
  */
 export async function connectTenant(
@@ -77,5 +79,6 @@ export async function connectTenant(
   });
 
   const agents = await syncAgents(prisma, tenant.id, ticketing);
-  return { tenantId: tenant.id, created: !existing, connectedAs: { name: me.name, email: me.email }, agents };
+  const ticketForms = await syncTicketForms(prisma, tenant.id, ticketing);
+  return { tenantId: tenant.id, created: !existing, connectedAs: { name: me.name, email: me.email }, agents, ticketForms };
 }

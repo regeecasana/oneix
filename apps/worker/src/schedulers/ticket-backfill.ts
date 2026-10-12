@@ -7,7 +7,7 @@ import type { Queue } from "bullmq";
  */
 export async function scheduleTenantSync(
   queue: Queue,
-  intervals: { backfillMinutes: number; agentsMinutes: number },
+  intervals: { backfillMinutes: number; agentsMinutes: number; formsMinutes: number },
 ): Promise<void> {
   // Replaces the single-tenant scheduler from before tenant connections existed.
   for (const scheduler of await queue.getJobSchedulers()) {
@@ -17,6 +17,7 @@ export async function scheduleTenantSync(
   const schedules: [FanOutJob["job"], number][] = [
     [TICKET_SYNC_JOBS.backfill, intervals.backfillMinutes],
     [TICKET_SYNC_JOBS.agents, intervals.agentsMinutes],
+    [TICKET_SYNC_JOBS.forms, intervals.formsMinutes],
   ];
   for (const [job, minutes] of schedules) {
     const data: FanOutJob = { job };

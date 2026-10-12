@@ -9,6 +9,7 @@ import {
   connectTenant,
   SecretBox,
   syncAgents,
+  syncTicketForms,
   TicketingRegistry,
   type ZendeskCredentials,
   zendeskCredentialsFromEnv,
@@ -36,6 +37,7 @@ Commands
   list                Show every tenant, its connection status, agents, and cached tickets.
   sync-agents         Refresh the tenant's Zendesk user directory and linked accounts now.
                                                                    --slug <slug>
+  sync-forms          Refresh the tenant's ticket forms and custom fields now.  --slug <slug>
   resync-tickets      Re-import every ticket from Zendesk, for example after oneix starts storing a
                       new ticket field.                            --slug <slug>
   set-webhook-secret  Store the Zendesk webhook signing secret.  --slug <slug> --secret <secret>
@@ -118,6 +120,8 @@ async function run(command: string): Promise<void> {
       return list();
     case "sync-agents":
       return syncAgentsNow(required("slug"));
+    case "sync-forms":
+      return syncFormsNow(required("slug"));
     case "resync-tickets":
       return resyncTickets(required("slug"));
     case "set-webhook-secret":
@@ -151,6 +155,7 @@ async function add(slug: string, subdomain: string, credentials: ZendeskCredenti
   console.log(`✔ Tenant ${result.created ? "created" : "updated"}: ${slug}`);
   console.log(`  Connected as:  ${result.connectedAs.name} <${result.connectedAs.email ?? "no email"}>`);
   console.log(`  Directory:     ${result.agents.directory} Zendesk agents and admins, ${result.agents.linked} linked to oneix accounts`);
+  console.log(`  Ticket forms:  ${result.ticketForms.forms} active forms, ${result.ticketForms.fields} active custom fields`);
   console.log(`  Ticket import: queued; the worker imports in the background`);
   console.log(`  Webhook URL:   <api host>/webhooks/zendesk/${slug}/ticket-updated`);
   console.log(`  Next:          invite people with npm run tenant -- invite --slug ${slug} --email … --name …`);
@@ -226,6 +231,13 @@ async function syncAgentsNow(slug: string): Promise<void> {
   const ticketing = await new TicketingRegistry(prisma, secrets).for(tenantId);
   const result = await syncAgents(prisma, tenantId, ticketing);
   console.log(`✔ ${slug}: ${result.directory} Zendesk users in the directory, ${result.linked} linked accounts refreshed, ${result.deactivated} lost access`);
+}
+
+async function syncFormsNow(slug: string): Promise<void> {
+  const tenantId = await tenantIdOf(prisma, slug);
+  const ticketing = await new TicketingRegistry(prisma, secrets).for(tenantId);
+  const result = await syncTicketForms(prisma, tenantId, ticketing);
+  console.log(`✔ ${slug}: ${result.forms} active ticket forms, ${result.fields} active custom fields`);
 }
 
 async function resyncTickets(slug: string): Promise<void> {
