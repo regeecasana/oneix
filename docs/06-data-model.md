@@ -46,23 +46,44 @@ A tenant's connection to a vendor platform. One Zendesk connection per tenant.
 
 ### User
 
-A person who signs in to oneix. Not tied to a tenant: one person can work for several clients.
+A oneix account: the orchestration identity a person signs in with. Separate from their Zendesk account and linked to it per tenant. Not tied to a tenant: one person can work for several clients.
 
 | Field | Notes |
 |---|---|
 | `id`, `name` | |
-| `email` | Unique |
-| `ssoSubject` | Subject from the identity provider |
+| `email` | Unique; the sign-in name |
+| `status` | `invited` until the invite link sets a password, `active`, `disabled` |
+| `passwordHash` | scrypt; null until the invite is accepted |
+| `failedLogins`, `lockedUntil` | Five wrong passwords lock the account for 15 minutes |
+| `ssoSubject` | Subject from the identity provider, once SSO is added |
+
+### Session
+
+A signed-in browser. The cookie holds a random token; only its hash is stored. Ends at sign-out, password reset, or after 12 hours.
+
+| Field | Notes |
+|---|---|
+| `tokenHash`, `userId` | |
+| `tenantId` | The workspace being worked in; switching workspace updates it |
+| `expiresAt`, `revokedAt`, `lastSeenAt` | |
+
+### AuthToken
+
+One-time links, stored as hashes: `invite` (7 days) and `password_reset` (24 hours).
+
+### BackendAgent
+
+The tenant's directory of Zendesk agents and admins, refreshed by the hourly sync: name, email, Zendesk roles, permissions, groups, organizations, and whether they're active. Accounts are linked to an entry; the directory itself never grants access.
 
 ### TenantMembership
 
-A user's access to one tenant, with their identities in that tenant's platforms. Provisioned from the tenant's Zendesk agents.
+A user's access to one tenant, with their identities in that tenant's platforms. Created by an invite.
 
 | Field | Notes |
 |---|---|
 | `id`, `userId` | |
-| `role` | `agent`, `admin`, from the Zendesk role |
-| `zendeskUserId` | The agent in this tenant's Zendesk. Unique per tenant |
+| `role` | oneix role: `admin` manages the team, `agent` works tickets. Independent of the Zendesk role |
+| `zendeskUserId`, `zendeskLinkedAt` | The linked Zendesk user, confirmed by an admin. Unique per tenant. Without it the account can't act on tickets |
 | `cxoneAgentId` | The agent in this tenant's CXone |
 | `roleNames` | Every role the agent holds in Zendesk, such as "Light agent", "Moderator" |
 | `canReplyPublicly` | False for agents limited to internal notes, such as light agents |

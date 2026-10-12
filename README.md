@@ -19,6 +19,7 @@ oneix is a B2B product: each client is a **tenant** with its own Zendesk instanc
 - [What runs today](#what-runs-today)
 - [Prerequisites](#prerequisites)
 - [Getting started](#getting-started)
+- [Accounts and sign-in](#accounts-and-sign-in)
 - [Adding a client tenant](#adding-a-client-tenant)
 - [Connecting Zendesk](#connecting-zendesk)
 - [API documentation](#api-documentation)
@@ -39,7 +40,8 @@ oneix is a B2B product: each client is a **tenant** with its own Zendesk instanc
 How tenants work:
 
 - **Each tenant has its own Zendesk connection**, stored in the database with its credentials encrypted. Every Zendesk call uses the tenant's own credentials, so tenants never share data or rate limits.
-- **Agents come from Zendesk.** Every Zendesk agent and admin of a tenant becomes a oneix agent automatically, linked by their Zendesk user ID. Agents removed or suspended in Zendesk lose access. The sync runs every hour and when a tenant is added.
+- **oneix accounts are separate from Zendesk accounts, and linked to them.** People sign in to oneix with their own email and password. Each account is linked, per workspace, to a user in that client's Zendesk (admin, agent, light agent, and so on), and acts as that user: replies and changes are written to Zendesk as them, with their Zendesk permissions. Later the same account links to CXone.
+- **Zendesk users are a directory, not accounts.** The hourly sync keeps a directory of each client's Zendesk agents and admins and refreshes the permissions of linked accounts. A linked account whose Zendesk user is removed or suspended loses access.
 - **One person can work for several clients.** Agents belong to tenants through memberships; an agent in more than one tenant switches client from the header.
 - **Agents see what Zendesk lets them see.** Each agent's Zendesk role, public-reply permission, and ticket restriction (all, groups, organization, or assigned tickets) are synced. A group-restricted agent sees only their groups' tickets, and light agents can add internal notes only.
 - **Every query is scoped to the agent's tenant.** The API uses a database client that adds the tenant filter itself, so a forgotten filter can't show one client's data to another.
@@ -51,7 +53,7 @@ How ticket data moves:
 - **Changes** (public replies, internal notes, status, priority, assignee) are written to Zendesk as the signed-in agent. Zendesk emails public replies to the customer.
 - **Cache freshness** comes from two sources per tenant: a Zendesk webhook for each ticket change, and a backfill every 5 minutes that catches anything missed. The first backfill imports all existing tickets.
 
-Sign-in is a development stub: you pick a client, then an agent. SSO replaces it once the identity provider is chosen.
+See [Accounts and sign-in](#accounts-and-sign-in) for how people get access.
 
 ## Prerequisites
 
@@ -75,12 +77,12 @@ On the first run it creates `.env` from `.env.example`, generates an encryption 
 1. checks that Docker is running and starts PostgreSQL and Redis,
 2. installs dependencies if `node_modules` is missing,
 3. applies database migrations and builds the apps,
-4. connects the development tenant from the `ZENDESK_*` values, the first time only, which also provisions its agents and queues the ticket import,
+4. connects the development tenant from the `ZENDESK_*` values, the first time only: it syncs the Zendesk directory, queues the ticket import, and invites the owner of the Zendesk API token as the first admin (the invite link is printed),
 5. runs api, worker, and web in watch mode.
 
 Every step is safe to repeat, so use the same command every time. Stop with Ctrl+C. The database containers keep running in the background; see [Everyday commands](#everyday-commands) to stop them.
 
-Then open http://localhost:3000, pick the client and an agent. Tickets appear as the worker imports them, usually within a minute.
+Then open the printed invite link to set your password, or use **Development sign-in** on the sign-in page to pick any account without a password. Tickets appear as the worker imports them, usually within a minute.
 
 > Variables already set in your shell take precedence over `.env`. If a value seems ignored, check your system environment variables.
 
@@ -99,6 +101,30 @@ npm run dev                                               # api, worker, web
 ```
 
 Generate the encryption key with `openssl rand -base64 32`, or let `npm start` do it.
+
+## Accounts and sign-in
+
+oneix has its own accounts: an email and password, never a Zendesk login.
+
+1. **An admin invites someone** from the **Team** page (workspace admins) or the CLI (oneix operations): their name, email, oneix role, and the Zendesk user to link. Picking the Zendesk user fills in the name and email.
+2. **oneix creates an invite link.** There is no email sending yet, so the admin copies the link and sends it. It works once and expires after 7 days.
+3. **The person sets a password** from the link and is signed in.
+
+| | |
+|---|---|
+| **oneix role** | `admin` manages the Team page; `agent` works tickets. Independent of the Zendesk role |
+| **Zendesk link** | Who the account acts as in Zendesk, with that user's permissions. Suggested when emails match; an admin confirms. An account without a link can sign in and read, but not reply or change tickets |
+| **Forgot password** | An admin creates a reset link from the Team page (or `npm run tenant -- reset-link --email …`) and sends it. It works once and expires after 24 hours |
+| **Security** | Passwords are scrypt hashes; sessions live on the server and end at sign-out, password reset, or when access is turned off; five wrong passwords lock the account for 15 minutes; cross-site requests are refused |
+| **Development** | With `AUTH_DEV_LOGIN=true`, the sign-in page also lists every account to pick without a password. Refused in production |
+
+CLI for oneix operations:
+
+| Command | Does |
+|---|---|
+| `npm run tenant -- users --slug acme` | Accounts in a workspace, their status, role, and Zendesk link |
+| `npm run tenant -- invite --slug acme --email … --name … [--role admin]` | Invites someone and prints their invite link; links them to the Zendesk user with the same email |
+| `npm run tenant -- reset-link --email …` | Prints a password reset link (or a fresh invite link if they never set a password) |
 
 ## Adding a client tenant
 
@@ -234,7 +260,6 @@ All variables are listed in [.env.example](.env.example), grouped by app. The ap
 | `REDIS_URL` | api, worker | Job queues |
 | `ONEIX_ENCRYPTION_KEY` | api, worker | Encrypts tenant credentials. 32 bytes, base64. Without it, stored credentials can't be read |
 | `DEV_TENANT_SLUG`, `DEV_TENANT_NAME`, `ZENDESK_*` | `npm start` | The development tenant, connected once. Defaults the slug to the subdomain |
-| `SESSION_SECRET` | api | Signs session cookies. At least 32 characters |
 | `AUTH_DEV_LOGIN` | api | Enables the development sign-in picker. Refused in production |
 | `API_DOCS` | api | Serves the API reference at `/docs` and the OpenAPI document at `/openapi.json`. On by default outside production |
 | `WEB_ORIGIN` | api | Allowed browser origin (CORS) |
@@ -252,7 +277,9 @@ Zendesk credentials are never given to the web app.
 | api or worker exits with `Invalid ... configuration` | A required variable is missing from `.env`. The message names it. |
 | `npm start` stops at "Connecting the development tenant" | The `ZENDESK_*` credentials are rejected, or don't belong to a Zendesk admin. The message says which. |
 | Login page says sign-in is unavailable | The api is not running, or `AUTH_DEV_LOGIN` is not `true`. |
-| Login page lists no clients | No tenant is connected yet. Set the `ZENDESK_*` values and run `npm start`, or use `npm run tenant -- add`. |
+| Can't sign in | Wrong password, the account is still invited (open the invite link first), or it's locked for 15 minutes after five wrong passwords. Ask an admin for a reset link. |
+| "Your account isn't linked to a Zendesk user" | An admin links it on the Team page. Until then the account can read but not act on tickets. |
+| Development sign-in lists no workspaces | No tenant is connected yet. Set the `ZENDESK_*` values and run `npm start`, or use `npm run tenant -- add`. |
 | Inbox stays empty | The worker is not running, the import is still in progress, or the filter is "Assigned to me" and nothing is assigned to you. Check `npm run tenant -- list` and the worker logs. |
 | "This workspace isn't connected to its ticket service yet" | The tenant has no connection, or it is disabled. See `npm run tenant -- list`. |
 | "The ticket service is unavailable" | A Zendesk call failed. The api logs show the cause. |
