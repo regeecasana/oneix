@@ -109,19 +109,30 @@ export type TicketSortField = z.infer<typeof TicketSortField>;
 export const SortOrder = z.enum(["asc", "desc"]);
 export type SortOrder = z.infer<typeof SortOrder>;
 
+/** Query filters shared by the ticket list and the channel counts; descriptions show in the API docs. */
+const StatusQuery = StatusList.optional().meta({
+  description: `One or more statuses, comma-separated: ${TICKET_STATUSES.join(", ")}.`,
+  example: "open,pending",
+});
+const PriorityQuery = PriorityList.optional().meta({
+  description: `One or more priorities, comma-separated: ${TICKET_PRIORITIES.join(", ")}, or ${NO_PRIORITY} for tickets without one.`,
+  example: "urgent,high",
+});
+const AssigneeQuery = z
+  .string()
+  .min(1)
+  .optional()
+  .meta({ description: "`me`, `unassigned`, or an agent's user ID. Omit for everyone's tickets.", example: "me" });
+
 export const ListTicketsQuery = z.object({
-  /** One or more statuses: `open,pending`. */
-  status: StatusList.optional(),
-  /** One or more priorities, `none` for tickets without one: `high,urgent`. */
-  priority: PriorityList.optional(),
-  /** `me`, `unassigned`, or a user ID. Omit for all tickets. */
-  assignee: z.string().min(1).optional(),
-  channel: TicketChannel.optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(25),
-  /** Defaults to the most recently updated first. */
-  sort: TicketSortField.default("updatedAt"),
-  order: SortOrder.default("desc"),
+  status: StatusQuery,
+  priority: PriorityQuery,
+  assignee: AssigneeQuery,
+  channel: TicketChannel.optional().meta({ description: "Only tickets from this channel." }),
+  page: z.coerce.number().int().min(1).default(1).meta({ description: "Page number, from 1." }),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25).meta({ description: "Tickets per page, up to 100." }),
+  sort: TicketSortField.default("updatedAt").meta({ description: "Column to sort by." }),
+  order: SortOrder.default("desc").meta({ description: "Sort direction." }),
 });
 export type ListTicketsQuery = z.input<typeof ListTicketsQuery>;
 
@@ -129,11 +140,9 @@ export const ListTicketsResponse = paginated(TicketSummary);
 
 /** Filters for the channel counts: the list's filters, without the channel itself. */
 export const ChannelCountsQuery = z.object({
-  /** One or more statuses: `open,pending`. */
-  status: StatusList.optional(),
-  /** One or more priorities, `none` for tickets without one: `high,urgent`. */
-  priority: PriorityList.optional(),
-  assignee: z.string().min(1).optional(),
+  status: StatusQuery,
+  priority: PriorityQuery,
+  assignee: AssigneeQuery,
 });
 export type ChannelCountsQuery = z.input<typeof ChannelCountsQuery>;
 
