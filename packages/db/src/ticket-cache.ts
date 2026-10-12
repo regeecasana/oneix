@@ -1,4 +1,4 @@
-import type { TicketPriority, TicketStatus } from "@oneix/contracts";
+import type { TicketChannel, TicketPriority, TicketStatus } from "@oneix/contracts";
 import type { PrismaClient } from "./generated/prisma/client.js";
 
 /**
@@ -19,6 +19,8 @@ export interface TicketSnapshot {
   assigneeExternalId: string | null;
   groupExternalId: string | null;
   organizationExternalId: string | null;
+  channel: TicketChannel;
+  channelDetail: string | null;
   updatedAt: Date;
   deleted: boolean;
 }
@@ -70,6 +72,8 @@ export async function cacheTicketSnapshot(
     subject: snapshot.subject,
     groupExternalId: snapshot.groupExternalId,
     organizationExternalId: snapshot.organizationExternalId,
+    channel: snapshot.channel,
+    channelDetail: snapshot.channelDetail,
     status: snapshot.status,
     priority: snapshot.priority,
     customerId: customer?.id ?? null,

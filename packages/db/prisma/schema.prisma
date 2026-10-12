@@ -55,6 +55,19 @@ enum ConnectionStatus {
   disabled
 }
 
+/// How a ticket reached support, grouped for the inbox tabs.
+enum TicketChannel {
+  email
+  chat
+  messaging
+  sunshine_conversations
+  social
+  phone
+  web_form
+  api
+  other
+}
+
 /// Which tickets an agent may see, mirrored from the backend.
 enum TicketAccess {
   all
@@ -191,6 +204,9 @@ model Ticket {
   groupExternalId        String?
   /// Backend organization of the requester; organization-restricted agents see only theirs.
   organizationExternalId String?
+  channel                TicketChannel   @default(other)
+  /// The specific source within the channel, for example "WhatsApp".
+  channelDetail          String?
   status                 TicketStatus
   priority               TicketPriority?
   /// Last update time reported by the backend. Older snapshots never overwrite newer ones.
@@ -206,6 +222,7 @@ model Ticket {
   @@unique([tenantId, externalId])
   @@index([tenantId, status, assigneeId])
   @@index([tenantId, groupExternalId])
+  @@index([tenantId, channel, externalUpdatedAt(sort: Desc)])
   @@index([tenantId, externalUpdatedAt(sort: Desc), id])
 }
 
