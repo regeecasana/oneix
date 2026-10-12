@@ -222,6 +222,15 @@ export function ticketOrderBy(sort: TicketSortField, order: SortOrder): Prisma.T
   return [primary, ...tieBreakers];
 }
 
+/**
+ * The backend user an agent's changes are written as. An account without a linked backend user
+ * can read but not act: its changes would otherwise be written as the API's own user.
+ */
 function actorOf(user: SessionUser): Actor {
+  if (!user.zendeskUserId) {
+    throw new ForbiddenException(
+      "Your account isn't linked to a Zendesk user yet, so you can't change tickets. Ask a workspace admin to link it.",
+    );
+  }
   return { email: user.email, externalUserId: user.zendeskUserId };
 }

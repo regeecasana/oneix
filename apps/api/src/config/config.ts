@@ -7,7 +7,6 @@ const schema = z
     WEB_ORIGIN: z.url().default("http://localhost:3000"),
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
-    SESSION_SECRET: z.string().min(32),
     AUTH_DEV_LOGIN: z.stringbool().default(false),
     /** Serves the API reference at /docs and the OpenAPI document at /openapi.json. Defaults to on outside production. */
     API_DOCS: z.stringbool().optional(),

@@ -6,6 +6,7 @@ const agent = (overrides: Partial<SessionUser>): SessionUser => ({
   id: "u1",
   email: "a@b.c",
   name: "Agent",
+  sessionId: "s1",
   tenantId: "t1",
   role: "agent",
   zendeskUserId: "900",
