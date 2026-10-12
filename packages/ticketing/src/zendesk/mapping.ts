@@ -1,4 +1,4 @@
-import type { TicketStatus } from "@oneix/contracts";
+import type { TicketChannel, TicketStatus } from "@oneix/contracts";
 import type { ExternalAgent, ExternalComment, ExternalCustomer, ExternalTicket } from "../provider.js";
 import type { ZendeskComment, ZendeskStatus, ZendeskTicket, ZendeskUser } from "./types.js";
 
@@ -88,8 +88,81 @@ export function toAgent(
   };
 }
 
+/** Zendesk channels that are social networks or chat apps. */
+const SOCIAL_CHANNELS = new Set([
+  "whatsapp",
+  "facebook",
+  "facebook_messenger",
+  "instagram",
+  "instagram_dm",
+  "twitter",
+  "twitter_dm",
+  "x_corp_dm",
+  "viber",
+  "line",
+  "wechat",
+  "telegram",
+  "kakaotalk",
+  "apple_business_chat",
+  "google_rcs",
+]);
+
+const CHANNEL_DETAIL_NAMES: Record<string, string> = {
+  whatsapp: "WhatsApp",
+  facebook: "Facebook",
+  facebook_messenger: "Messenger",
+  instagram: "Instagram",
+  instagram_dm: "Instagram",
+  twitter: "X",
+  twitter_dm: "X",
+  x_corp_dm: "X",
+  viber: "Viber",
+  line: "LINE",
+  wechat: "WeChat",
+  telegram: "Telegram",
+  kakaotalk: "KakaoTalk",
+  apple_business_chat: "Apple Messages",
+  google_rcs: "RCS",
+  native_messaging: "Messaging",
+  mobile_sdk: "Mobile app",
+  voice: "Voice",
+  sms: "SMS",
+  web: "Web form",
+  help_center: "Help center",
+  side_conversation: "Side conversation",
+  api: "API",
+};
+
+/**
+ * Groups Zendesk's `via.channel` into the channels oneix shows, and keeps the specific source.
+ * Sunshine Conversations channels arrive as `sunshine_conversations_<source>`.
+ */
+export function toChannel(viaChannel: string | null | undefined): { channel: TicketChannel; detail: string | null } {
+  const raw = viaChannel ?? "";
+  const named = (key: string) => CHANNEL_DETAIL_NAMES[key] ?? humanize(key);
+
+  if (raw.startsWith("sunshine_conversations")) {
+    const source = raw.replace(/^sunshine_conversations_?/, "");
+    return { channel: "sunshine_conversations", detail: source ? named(source) : null };
+  }
+  if (raw === "email") return { channel: "email", detail: null };
+  if (raw === "chat" || raw === "chat_transcript") return { channel: "chat", detail: null };
+  if (raw === "native_messaging" || raw === "mobile_sdk") return { channel: "messaging", detail: named(raw) };
+  if (SOCIAL_CHANNELS.has(raw)) return { channel: "social", detail: named(raw) };
+  if (raw === "voice" || raw === "sms") return { channel: "phone", detail: named(raw) };
+  if (raw === "web" || raw === "help_center" || raw === "mobile") return { channel: "web_form", detail: named(raw) };
+  if (raw === "api") return { channel: "api", detail: null };
+  return { channel: "other", detail: raw ? named(raw) : null };
+}
+
+function humanize(key: string): string {
+  const words = key.replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function toTicket(ticket: ZendeskTicket, users: Map<number, ZendeskUser>): ExternalTicket {
   const requester = ticket.requester_id === null ? undefined : users.get(ticket.requester_id);
+  const channel = toChannel(ticket.via?.channel);
   return {
     externalId: String(ticket.id),
     subject: ticket.subject || "(no subject)",
@@ -99,6 +172,8 @@ export function toTicket(ticket: ZendeskTicket, users: Map<number, ZendeskUser>)
     assigneeExternalId: ticket.assignee_id === null ? null : String(ticket.assignee_id),
     groupExternalId: ticket.group_id == null ? null : String(ticket.group_id),
     organizationExternalId: ticket.organization_id == null ? null : String(ticket.organization_id),
+    channel: channel.channel,
+    channelDetail: channel.detail,
     createdAt: new Date(ticket.created_at),
     updatedAt: new Date(ticket.updated_at),
     deleted: ticket.status === "deleted",

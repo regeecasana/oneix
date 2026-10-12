@@ -12,6 +12,8 @@ export interface ZendeskTicket {
   assignee_id: number | null;
   group_id?: number | null;
   organization_id?: number | null;
+  /** How the ticket was created, for example "email", "web", "native_messaging". */
+  via?: { channel?: string | null } | null;
   created_at: string;
   updated_at: string;
 }

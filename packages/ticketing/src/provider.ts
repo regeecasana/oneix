@@ -1,4 +1,4 @@
-import type { TicketPriority, TicketStatus } from "@oneix/contracts";
+import type { TicketChannel, TicketPriority, TicketStatus } from "@oneix/contracts";
 
 /**
  * The only way oneix talks to a ticketing backend.
@@ -80,6 +80,10 @@ export interface ExternalTicket {
   /** The group the ticket is assigned to, which decides who may see it under group restrictions. */
   groupExternalId: string | null;
   organizationExternalId: string | null;
+  /** How the ticket reached support, grouped. */
+  channel: TicketChannel;
+  /** The specific source within the channel, readable, for example "WhatsApp". */
+  channelDetail: string | null;
   createdAt: Date;
   updatedAt: Date;
   deleted: boolean;

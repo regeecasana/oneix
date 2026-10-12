@@ -82,6 +82,8 @@ describe("ZendeskProvider", () => {
       assigneeExternalId: "20",
       groupExternalId: null,
       organizationExternalId: null,
+      channel: "other",
+      channelDetail: null,
       createdAt: new Date("2026-10-01T10:00:00Z"),
       updatedAt: new Date("2026-10-02T10:00:00Z"),
       deleted: false,
