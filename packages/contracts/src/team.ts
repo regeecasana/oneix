@@ -44,13 +44,27 @@ export const BackendDirectoryResponse = z.object({
 });
 export type BackendDirectoryResponse = z.infer<typeof BackendDirectoryResponse>;
 
-export const InviteMemberRequest = z.object({
-  email: z.email(),
-  name: z.string().trim().min(1).max(120),
-  role: UserRole.default("agent"),
-  /** Backend user to link the account to; omit to link later. */
-  zendeskUserId: z.string().min(1).nullable().optional(),
+/** A new agent to create in the workspace's ticketing backend for the person being invited. */
+export const NewBackendAgent = z.object({
+  /** A role key from the backend options: "admin", "agent", or "custom:<id>". */
+  roleKey: z.string().min(1),
+  groupIds: z.array(z.string().min(1)).default([]),
 });
+export type NewBackendAgent = z.input<typeof NewBackendAgent>;
+
+export const InviteMemberRequest = z
+  .object({
+    email: z.email(),
+    name: z.string().trim().min(1).max(120),
+    role: UserRole.default("agent"),
+    /** Existing backend user to link the account to; omit to link later. */
+    zendeskUserId: z.string().min(1).nullable().optional(),
+    /** Or: create a new agent in the backend and link the account to it. */
+    newZendeskAgent: NewBackendAgent.optional(),
+  })
+  .refine((v) => !(v.zendeskUserId && v.newZendeskAgent), {
+    message: "Link an existing Zendesk user or create a new one, not both",
+  });
 export type InviteMemberRequest = z.input<typeof InviteMemberRequest>;
 
 /** A one-time link for the person; there is no email sending yet, so the admin sends it. */
@@ -78,3 +92,17 @@ export const UpdateMemberRequest = z
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "No changes given" });
 export type UpdateMemberRequest = z.infer<typeof UpdateMemberRequest>;
+
+/** What a new backend agent can be given: roles and groups. */
+export const BackendAgentOptionsResponse = z.object({
+  roles: z.array(
+    z.object({
+      key: z.string(),
+      name: z.string(),
+      /** False for roles limited to internal notes, such as light agents. */
+      publicReplies: z.boolean(),
+    }),
+  ),
+  groups: z.array(z.object({ id: z.string(), name: z.string() })),
+});
+export type BackendAgentOptionsResponse = z.infer<typeof BackendAgentOptionsResponse>;
