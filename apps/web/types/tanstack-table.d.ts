@@ -5,5 +5,7 @@ declare module "@tanstack/react-table" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface ColumnMeta<TData, TValue> {
     className?: string
+    /** Fixed column width in px. A column without one takes the remaining space. */
+    width?: number
   }
 }

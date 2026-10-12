@@ -37,19 +37,24 @@ export function ticketColumns(
       accessorFn: (ticket) => ticket.number,
       header: ({ column }) => <SortableHeader column={column} title="#" />,
       cell: ({ row }) => <span className="text-muted-foreground tabular-nums">#{row.original.number}</span>,
-      meta: { className: "w-24 pl-4" },
+      meta: { className: "pl-4", width: 96 },
     },
     {
       id: "subject",
       accessorFn: (ticket) => ticket.subject,
       header: ({ column }) => <SortableHeader column={column} title="Subject" />,
-      cell: ({ row }) => <span className="block max-w-md truncate font-medium">{row.original.subject}</span>,
+      cell: ({ row }) => (
+        <span className="block truncate font-medium" title={row.original.subject}>
+          {row.original.subject}
+        </span>
+      ),
     },
     {
       id: "channel",
       accessorFn: (ticket) => ticket.channel,
       header: ({ column }) => <SortableHeader column={column} title="Channel" />,
       cell: ({ row }) => <ChannelLabel channel={row.original.channel} detail={row.original.channelDetail} />,
+      meta: { width: 176 },
     },
     {
       id: "customer",
@@ -57,10 +62,14 @@ export function ticketColumns(
       header: ({ column }) => <SortableHeader column={column} title="Customer" />,
       cell: ({ row }) => {
         const customer = row.original.customer
+        const label = customer?.name ?? customer?.email ?? customer?.phone ?? "—"
         return (
-          <span className="text-muted-foreground">{customer?.name ?? customer?.email ?? customer?.phone ?? "—"}</span>
+          <span className="block truncate text-muted-foreground" title={label}>
+            {label}
+          </span>
         )
       },
+      meta: { width: 184 },
     },
     {
       id: "status",
@@ -74,6 +83,7 @@ export function ticketColumns(
         />
       ),
       cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      meta: { width: 120 },
     },
     {
       id: "priority",
@@ -87,12 +97,21 @@ export function ticketColumns(
         />
       ),
       cell: ({ row }) => <PriorityLabel priority={row.original.priority} />,
+      meta: { width: 120 },
     },
     {
       id: "assignee",
       accessorFn: (ticket) => ticket.assignee?.name ?? null,
       header: ({ column }) => <SortableHeader column={column} title="Assignee" />,
-      cell: ({ row }) => <span className="text-muted-foreground">{row.original.assignee?.name ?? "Unassigned"}</span>,
+      cell: ({ row }) => {
+        const label = row.original.assignee?.name ?? "Unassigned"
+        return (
+          <span className="block truncate text-muted-foreground" title={label}>
+            {label}
+          </span>
+        )
+      },
+      meta: { width: 168 },
     },
     {
       id: "updatedAt",
@@ -103,7 +122,7 @@ export function ticketColumns(
           {timeAgo(row.original.updatedAt)}
         </span>
       ),
-      meta: { className: "pr-4 text-right" },
+      meta: { className: "pr-4 text-right", width: 120 },
     },
   ]
 }

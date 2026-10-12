@@ -45,11 +45,11 @@ export const channelIcons: Record<TicketChannel, LucideIcon> = {
 /** Channel with its specific source when there is one: "Social · WhatsApp". */
 export function ChannelLabel({ channel, detail }: { channel: TicketChannel; detail: string | null }) {
   const Icon = channelIcons[channel]
+  const label = detail && detail !== channelLabels[channel] ? `${channelLabels[channel]} · ${detail}` : channelLabels[channel]
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
+    <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground" title={label}>
       <Icon className="size-3.5 shrink-0" aria-hidden />
-      {channelLabels[channel]}
-      {detail && detail !== channelLabels[channel] && <span className="text-muted-foreground/70">· {detail}</span>}
+      <span className="truncate">{label}</span>
     </span>
   )
 }

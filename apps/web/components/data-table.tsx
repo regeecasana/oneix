@@ -26,6 +26,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
+const MIN_FLEXIBLE_COLUMN_WIDTH = 240
+
 interface DataTableProps<TData> {
   columns: ColumnDef<TData>[]
   data: TData[]
@@ -44,6 +46,7 @@ interface DataTableProps<TData> {
  * shadcn data table on TanStack Table, for server-side data: sorting and pagination are
  * reported to the caller, which fetches the matching rows.
  * Clicking a sortable header cycles ascending, descending, then back to the default order.
+ * Columns have fixed widths (`meta.width`); text that doesn't fit ends in an ellipsis.
  */
 export function DataTable<TData>({
   columns,
@@ -71,8 +74,14 @@ export function DataTable<TData>({
     onSortingChange,
   })
 
+  // The column without a width (for example the subject) keeps at least this much room;
+  // on narrower screens the table scrolls sideways instead of squeezing it to nothing.
+  const fixedWidth = columns.reduce((sum, column) => sum + (column.meta?.width ?? 0), 0)
+  const flexibleColumns = columns.filter((column) => column.meta?.width === undefined).length
+  const minWidth = fixedWidth + flexibleColumns * MIN_FLEXIBLE_COLUMN_WIDTH
+
   return (
-    <Table>
+    <Table className="table-fixed" style={{ minWidth }}>
       <TableHeader>
         {table.getHeaderGroups().map((group) => (
           <TableRow key={group.id}>
@@ -81,7 +90,8 @@ export function DataTable<TData>({
               return (
                 <TableHead
                   key={header.id}
-                  className={cn(header.column.columnDef.meta?.className)}
+                  className={cn("overflow-hidden", header.column.columnDef.meta?.className)}
+                  style={{ width: header.column.columnDef.meta?.width }}
                   aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
                 >
                   {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
@@ -108,7 +118,7 @@ export function DataTable<TData>({
               onClick={onRowClick ? () => onRowClick(row.original) : undefined}
             >
               {row.getVisibleCells().map((cell) => (
-                <TableCell key={cell.id} className={cn(cell.column.columnDef.meta?.className)}>
+                <TableCell key={cell.id} className={cn("truncate", cell.column.columnDef.meta?.className)}>
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </TableCell>
               ))}
