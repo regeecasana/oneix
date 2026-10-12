@@ -70,7 +70,7 @@ export default function TeamPage() {
   const unlinked = members.filter((m) => m.active && !m.linkedTo).length
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6">
+    <div className="mx-auto flex flex-col gap-4 px-6 py-6">
       <div className="flex flex-wrap items-center gap-3">
         <div className="mr-auto">
           <h1 className="text-lg font-semibold">Team</h1>

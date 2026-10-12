@@ -1,14 +1,12 @@
 "use client"
 
-import { Inbox, KeyRound, Link2, LogOut, Moon, Sun, Users } from "lucide-react"
+import { Check, ChevronsUpDown, Inbox, KeyRound, Link2, LogOut, Moon, Sun, Users } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { type ReactNode, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,28 +16,41 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar"
 import { Spinner } from "@/components/ui/spinner"
 import { ChangePasswordDialog } from "@/features/auth/change-password-dialog"
 import { useLogout, useMe, useSwitchTenant } from "@/features/auth/queries"
 import { RoleBadge } from "@/features/tickets/labels"
 import { initials } from "@/features/tickets/thread"
-import { cn } from "@/lib/utils"
 
 const nav = [
   { href: "/inbox", label: "Inbox", icon: Inbox, matches: ["/inbox", "/tickets"], adminOnly: false },
   { href: "/team", label: "Team", icon: Users, matches: ["/team"], adminOnly: true },
 ]
 
-/** Workspace shell. Agent state and the softphone dock join the header in later milestones. */
+type Me = NonNullable<ReturnType<typeof useMe>["data"]>
+
+/** Workspace shell: a collapsible sidebar with the client workspace, navigation, and the account menu. */
 export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   const me = useMe()
-  const logout = useLogout()
-  const switchTenant = useSwitchTenant()
   const pathname = usePathname()
-  const router = useRouter()
-  const { resolvedTheme, setTheme } = useTheme()
-  const [changingPassword, setChangingPassword] = useState(false)
 
   if (me.isPending) {
     return (
@@ -60,102 +71,185 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
     )
   }
 
+  const items = nav.filter((item) => !item.adminOnly || me.data.role === "admin")
+  const current = items.find((item) => item.matches.some((prefix) => pathname.startsWith(prefix)))
+
   return (
-    <div className="flex min-h-svh flex-col bg-muted/30">
-      <header className="sticky top-0 z-10 border-b bg-background">
-        <div className="flex h-14 items-center gap-4 px-6">
-          <Link href="/inbox" className="text-base font-semibold tracking-tight">
-            oneix
-          </Link>
-
-          {/* The client workspace the agent is in. Agents serving several clients switch here. */}
-          {me.data.tenants.length > 1 ? (
-            <Select
-              value={me.data.tenant.slug}
-              disabled={switchTenant.isPending}
-              onValueChange={(slug) => switchTenant.mutate(slug, { onSuccess: () => router.replace("/inbox") })}
-            >
-              <SelectTrigger size="sm" aria-label="Client workspace" className="font-medium">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {me.data.tenants.map((t) => (
-                  <SelectItem key={t.slug} value={t.slug}>
-                    {t.name}
-                  </SelectItem>
+    <SidebarProvider>
+      <Sidebar collapsible="icon">
+        <SidebarHeader>
+          <WorkspaceSwitcher me={me.data} />
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {items.map((item) => (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton asChild isActive={item === current} tooltip={item.label}>
+                      <Link href={item.href}>
+                        <item.icon />
+                        <span>{item.label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Badge variant="secondary">{me.data.tenant.name}</Badge>
-          )}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+        <SidebarFooter>
+          <AccountMenu me={me.data} />
+        </SidebarFooter>
+        <SidebarRail />
+      </Sidebar>
 
-          <nav className="flex gap-1">
-            {nav.filter((item) => !item.adminOnly || me.data.role === "admin").map((item) => {
-              const active = item.matches.some((prefix) => pathname.startsWith(prefix))
-              return (
-                <Button key={item.href} asChild variant="ghost" size="sm" className={cn(active && "bg-muted")}>
-                  <Link href={item.href}>
-                    <item.icon data-icon="inline-start" />
-                    {item.label}
-                  </Link>
-                </Button>
-              )
-            })}
-          </nav>
+      <SidebarInset className="min-w-0 bg-muted/30">
+        <header className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
+          <span className="text-sm font-medium">{current?.label}</span>
+        </header>
+        {!me.data.permissions.linked && (
+          <div className="border-b bg-amber-50 px-6 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+            <span className="flex items-center gap-2">
+              <Link2 className="size-4 shrink-0" aria-hidden />
+              Your account isn&apos;t linked to a Zendesk user yet, so you can read tickets but not reply or change them.
+              Ask a workspace admin to link it.
+            </span>
+          </div>
+        )}
+        <div className="flex-1">{children}</div>
+      </SidebarInset>
+    </SidebarProvider>
+  )
+}
 
+/** oneix and the client workspace the agent is in. Agents serving several clients switch here. */
+function WorkspaceSwitcher({ me }: { me: Me }) {
+  const switchTenant = useSwitchTenant()
+  const router = useRouter()
+  const { isMobile } = useSidebar()
+  const several = me.tenants.length > 1
+
+  const button = (
+    <SidebarMenuButton
+      size="lg"
+      tooltip={me.tenant.name}
+      disabled={switchTenant.isPending}
+      className="data-[state=open]:bg-sidebar-accent"
+      asChild={!several}
+    >
+      {several ? (
+        <WorkspaceLabel name={me.tenant.name} switchable />
+      ) : (
+        <Link href="/inbox">
+          <WorkspaceLabel name={me.tenant.name} />
+        </Link>
+      )}
+    </SidebarMenuButton>
+  )
+
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        {several ? (
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="ml-auto gap-2">
-                <Avatar size="sm">
-                  <AvatarFallback>{initials(me.data.name)}</AvatarFallback>
-                </Avatar>
-                <span className="hidden sm:inline">{me.data.name}</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel className="flex flex-col gap-1.5">
-                <span className="font-medium text-foreground">{me.data.name}</span>
-                <span className="text-xs font-normal text-muted-foreground">{me.data.email}</span>
-                <span className="flex flex-wrap gap-1">
-                  {me.data.roles.map((role) => (
-                    <RoleBadge key={role} role={role} />
-                  ))}
-                </span>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuItem onSelect={() => setChangingPassword(true)}>
-                  <KeyRound />
-                  Change password
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>
-                  {resolvedTheme === "dark" ? <Sun /> : <Moon />}
-                  {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
-                </DropdownMenuItem>
+            <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side={isMobile ? "bottom" : "right"} className="w-60">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">Client workspaces</DropdownMenuLabel>
+              {me.tenants.map((t) => (
                 <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={() => logout.mutate(undefined, { onSuccess: () => router.replace("/login") })}
+                  key={t.slug}
+                  onSelect={() => {
+                    if (t.slug !== me.tenant.slug) switchTenant.mutate(t.slug, { onSuccess: () => router.replace("/inbox") })
+                  }}
                 >
-                  <LogOut />
-                  Sign out
+                  {t.name}
+                  {t.slug === me.tenant.slug && <Check className="ml-auto" />}
                 </DropdownMenuItem>
-              </DropdownMenuGroup>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-      </header>
-      {!me.data.permissions.linked && (
-        <div className="border-b bg-amber-50 px-6 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
-          <span className="mx-auto flex max-w-7xl items-center gap-2">
-            <Link2 className="size-4 shrink-0" aria-hidden />
-            Your account isn&apos;t linked to a Zendesk user yet, so you can read tickets but not reply or change them. Ask a
-            workspace admin to link it.
-          </span>
-        </div>
-      )}
-      <main className="flex-1">{children}</main>
-      <ChangePasswordDialog open={changingPassword} onOpenChange={setChangingPassword} />
-    </div>
+        ) : (
+          button
+        )}
+      </SidebarMenuItem>
+    </SidebarMenu>
+  )
+}
+
+function WorkspaceLabel({ name, switchable = false }: { name: string; switchable?: boolean }) {
+  return (
+    <>
+      <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
+        o
+      </span>
+      <span className="grid flex-1 text-left leading-tight">
+        <span className="truncate font-semibold tracking-tight">oneix</span>
+        <span className="truncate text-xs text-muted-foreground">{name}</span>
+      </span>
+      {switchable && <ChevronsUpDown className="ml-auto" />}
+    </>
+  )
+}
+
+function AccountMenu({ me }: { me: Me }) {
+  const logout = useLogout()
+  const router = useRouter()
+  const { isMobile } = useSidebar()
+  const { resolvedTheme, setTheme } = useTheme()
+  const [changingPassword, setChangingPassword] = useState(false)
+
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton size="lg" tooltip={me.name} className="data-[state=open]:bg-sidebar-accent">
+              <Avatar className="size-8 rounded-lg">
+                <AvatarFallback className="rounded-lg">{initials(me.name)}</AvatarFallback>
+              </Avatar>
+              <span className="grid flex-1 text-left leading-tight">
+                <span className="truncate font-medium">{me.name}</span>
+                <span className="truncate text-xs text-muted-foreground">{me.email}</span>
+              </span>
+              <ChevronsUpDown className="ml-auto" />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" side={isMobile ? "bottom" : "right"} className="w-64">
+            <DropdownMenuLabel className="flex flex-col gap-1.5">
+              <span className="font-medium text-foreground">{me.name}</span>
+              <span className="text-xs font-normal text-muted-foreground">{me.email}</span>
+              <span className="flex flex-wrap gap-1">
+                {me.roles.map((role) => (
+                  <RoleBadge key={role} role={role} />
+                ))}
+              </span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={() => setChangingPassword(true)}>
+                <KeyRound />
+                Change password
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>
+                {resolvedTheme === "dark" ? <Sun /> : <Moon />}
+                {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => logout.mutate(undefined, { onSuccess: () => router.replace("/login") })}
+              >
+                <LogOut />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <ChangePasswordDialog open={changingPassword} onOpenChange={setChangingPassword} />
+      </SidebarMenuItem>
+    </SidebarMenu>
   )
 }

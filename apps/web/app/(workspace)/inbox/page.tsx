@@ -87,7 +87,7 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6">
+    <div className="mx-auto flex flex-col gap-4 px-6 py-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="mr-auto text-lg font-semibold">Inbox</h1>
         <Select
