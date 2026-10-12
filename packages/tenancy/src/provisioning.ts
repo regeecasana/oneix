@@ -1,6 +1,6 @@
 import { permissionsFrom } from "@oneix/accounts";
-import type { PrismaClient } from "@oneix/db";
-import type { TicketingProvider } from "@oneix/ticketing";
+import type { BackendAgent, PrismaClient } from "@oneix/db";
+import type { ExternalAgent, TicketingProvider } from "@oneix/ticketing";
 
 export interface AgentSyncResult {
   /** Agents and admins in the tenant's backend directory after the sync. */
@@ -29,23 +29,7 @@ export async function syncAgents(
   const result: AgentSyncResult = { directory: 0, linked: 0, deactivated: 0 };
 
   for (const agent of agents) {
-    const data = {
-      name: agent.name,
-      email: agent.email?.toLowerCase() ?? null,
-      role: agent.role === "admin" ? ("admin" as const) : ("agent" as const),
-      roleNames: agent.roleNames,
-      canReplyPublicly: agent.permissions.publicReplies,
-      ticketAccess: agent.permissions.ticketAccess,
-      groupExternalIds: agent.groupExternalIds,
-      organizationExternalIds: agent.organizationExternalIds,
-      active: agent.active,
-      syncedAt,
-    };
-    const row = await prisma.backendAgent.upsert({
-      where: { tenantId_provider_externalId: { tenantId, provider: "zendesk", externalId: agent.externalId } },
-      create: { tenantId, provider: "zendesk", externalId: agent.externalId, ...data },
-      update: data,
-    });
+    const row = await upsertBackendAgent(prisma, tenantId, agent, syncedAt);
     result.directory++;
 
     if (!agent.active) continue;
@@ -73,4 +57,30 @@ export async function syncAgents(
   });
   result.deactivated = removed.count;
   return result;
+}
+
+/** Writes one backend user into the tenant's directory, as the sync sees it. */
+export function upsertBackendAgent(
+  prisma: PrismaClient,
+  tenantId: string,
+  agent: ExternalAgent,
+  syncedAt = new Date(),
+): Promise<BackendAgent> {
+  const data = {
+    name: agent.name,
+    email: agent.email?.toLowerCase() ?? null,
+    role: agent.role === "admin" ? ("admin" as const) : ("agent" as const),
+    roleNames: agent.roleNames,
+    canReplyPublicly: agent.permissions.publicReplies,
+    ticketAccess: agent.permissions.ticketAccess,
+    groupExternalIds: agent.groupExternalIds,
+    organizationExternalIds: agent.organizationExternalIds,
+    active: agent.active,
+    syncedAt,
+  };
+  return prisma.backendAgent.upsert({
+    where: { tenantId_provider_externalId: { tenantId, provider: "zendesk", externalId: agent.externalId } },
+    create: { tenantId, provider: "zendesk", externalId: agent.externalId, ...data },
+    update: data,
+  });
 }
