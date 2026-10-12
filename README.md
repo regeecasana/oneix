@@ -21,6 +21,7 @@ oneix is a B2B product: each client is a **tenant** with its own Zendesk instanc
 - [Getting started](#getting-started)
 - [Adding a client tenant](#adding-a-client-tenant)
 - [Connecting Zendesk](#connecting-zendesk)
+- [API documentation](#api-documentation)
 - [Everyday commands](#everyday-commands)
 - [Project layout](#project-layout)
 - [Environment variables](#environment-variables)
@@ -32,7 +33,7 @@ oneix is a B2B product: each client is a **tenant** with its own Zendesk instanc
 | App | URL | What it does |
 |---|---|---|
 | `apps/web` | http://localhost:3000 | Agent workspace: sign-in, client switcher, inbox, ticket view with replies and notes |
-| `apps/api` | http://localhost:4000 | REST API, per-tenant Zendesk webhooks. Health check at `/health` |
+| `apps/api` | http://localhost:4000 | REST API, per-tenant Zendesk webhooks. Health check at `/health`. API docs at [/docs](http://localhost:4000/docs) |
 | `apps/worker` | — | Processes webhooks, keeps each tenant's ticket cache and agents in sync with its Zendesk. Also hosts the tenant CLI |
 
 How tenants work:
@@ -159,6 +160,19 @@ Without the webhook, oneix still syncs through the backfill every 5 minutes. Wit
 
 Zendesk must be able to reach the API. For local development, expose port 4000 with a tunnel (for example ngrok or Cloudflare Tunnel), or skip the webhook and rely on the backfill.
 
+## API documentation
+
+The API documents itself while it runs:
+
+- **API reference (Scalar):** http://localhost:4000/docs
+- **OpenAPI document:** http://localhost:4000/openapi.json
+
+To try authenticated endpoints, send `POST /auth/dev-login` from the reference page first; the browser keeps the session cookie for the rest.
+
+How it's built: `@nestjs/swagger` generates the OpenAPI document, and [Scalar](https://scalar.com) renders it. The schemas come from the same Zod contracts in `@oneix/contracts` that validate requests, so the documentation stays in step with the API. Controllers declare schemas with `@Body({ schema })` and `@Query({ schema })`, and responses with `@ApiOkResponse({ standardSchema })`. The OpenAPI document also imports into Postman or Insomnia.
+
+The docs are on by default outside production; set `API_DOCS=false` to turn them off.
+
 ## Everyday commands
 
 | Command | Does |
@@ -222,6 +236,7 @@ All variables are listed in [.env.example](.env.example), grouped by app. The ap
 | `DEV_TENANT_SLUG`, `DEV_TENANT_NAME`, `ZENDESK_*` | `npm start` | The development tenant, connected once. Defaults the slug to the subdomain |
 | `SESSION_SECRET` | api | Signs session cookies. At least 32 characters |
 | `AUTH_DEV_LOGIN` | api | Enables the development sign-in picker. Refused in production |
+| `API_DOCS` | api | Serves the API reference at `/docs` and the OpenAPI document at `/openapi.json`. On by default outside production |
 | `WEB_ORIGIN` | api | Allowed browser origin (CORS) |
 | `TICKET_BACKFILL_INTERVAL_MINUTES` | worker | How often each tenant's ticket cache is backfilled |
 | `AGENT_SYNC_INTERVAL_MINUTES` | worker | How often each tenant's agents are provisioned from Zendesk |

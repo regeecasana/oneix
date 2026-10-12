@@ -143,6 +143,8 @@ Routing a takeover to the specific agent who clicked the button depends on CXone
 
 ## API surface (MVP)
 
+The running API serves its full, generated documentation: an API reference (Scalar) at `/docs` and OpenAPI at `/openapi.json`.
+
 ### Workspace API
 
 | Method | Path | Purpose |
