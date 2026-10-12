@@ -1,4 +1,5 @@
 import type {
+  BackendAgentOptionsResponse,
   BackendDirectoryResponse,
   InviteMemberRequest,
   InviteMemberResponse,
@@ -20,6 +21,16 @@ export function useBackendDirectory() {
     queryKey: ["team", "directory"],
     queryFn: () => api<BackendDirectoryResponse>("/team/directory"),
     staleTime: 60_000,
+  })
+}
+
+/** Roles and groups for creating a Zendesk agent; only loaded when needed. */
+export function useAgentOptions(enabled: boolean) {
+  return useQuery({
+    queryKey: ["team", "zendesk-options"],
+    queryFn: () => api<BackendAgentOptionsResponse>("/team/zendesk-options"),
+    enabled,
+    staleTime: 5 * 60_000,
   })
 }
 
