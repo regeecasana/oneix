@@ -45,6 +45,7 @@ export type TicketChannel = z.infer<typeof TicketChannel>;
 
 export const TicketSummary = z.object({
   id: z.string(),
+  /** The backend's ticket number, the same one agents see in Zendesk. Used in ticket URLs. */
   number: z.number().int(),
   subject: z.string(),
   status: TicketStatus,
@@ -58,6 +59,17 @@ export const TicketSummary = z.object({
 });
 export type TicketSummary = z.infer<typeof TicketSummary>;
 
+/**
+ * A custom field's value: text, a number as text, a date as YYYY-MM-DD, a dropdown option's value,
+ * the option values of a multi-select, or a checkbox. Null when empty.
+ */
+export const CustomFieldValue = z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]);
+export type CustomFieldValue = z.infer<typeof CustomFieldValue>;
+
+/** Custom field values by field ID. Empty fields are left out. */
+export const CustomFieldValues = z.record(z.string(), CustomFieldValue);
+export type CustomFieldValues = z.infer<typeof CustomFieldValues>;
+
 export const ThreadEntry = z.object({
   id: z.string(),
   kind: z.enum(["message", "internal_note"]),
@@ -65,12 +77,19 @@ export const ThreadEntry = z.object({
   author: z.object({
     name: z.string(),
     type: z.enum(["customer", "agent", "system"]),
+    /** True when the signed-in agent wrote it. */
+    isYou: z.boolean(),
   }),
   createdAt: z.iso.datetime(),
 });
 export type ThreadEntry = z.infer<typeof ThreadEntry>;
 
 export const TicketDetail = TicketSummary.extend({
+  /** The ticket form; null for the account's default form. */
+  formId: z.string().nullable(),
+  /** The brand, which decides the forms the ticket can use; null when the backend has no brands. */
+  brandId: z.string().nullable(),
+  customFields: CustomFieldValues,
   thread: z.array(ThreadEntry),
 });
 export type TicketDetail = z.infer<typeof TicketDetail>;
@@ -118,6 +137,13 @@ const PriorityQuery = PriorityList.optional().meta({
   description: `One or more priorities, comma-separated: ${TICKET_PRIORITIES.join(", ")}, or ${NO_PRIORITY} for tickets without one.`,
   example: "urgent,high",
 });
+const SearchQuery = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .optional()
+  .meta({ description: "Matches the subject, the ticket number, or the customer's name or email.", example: "refund" });
 const AssigneeQuery = z
   .string()
   .min(1)
@@ -125,6 +151,7 @@ const AssigneeQuery = z
   .meta({ description: "`me`, `unassigned`, or an agent's user ID. Omit for everyone's tickets.", example: "me" });
 
 export const ListTicketsQuery = z.object({
+  q: SearchQuery,
   status: StatusQuery,
   priority: PriorityQuery,
   assignee: AssigneeQuery,
@@ -140,6 +167,7 @@ export const ListTicketsResponse = paginated(TicketSummary);
 
 /** Filters for the channel counts: the list's filters, without the channel itself. */
 export const ChannelCountsQuery = z.object({
+  q: SearchQuery,
   status: StatusQuery,
   priority: PriorityQuery,
   assignee: AssigneeQuery,
@@ -159,6 +187,10 @@ export const UpdateTicketRequest = z
     status: SettableTicketStatus.optional(),
     priority: TicketPriority.nullable().optional(),
     assigneeId: z.string().nullable().optional(),
+    formId: z.string().min(1).optional().meta({ description: "Switches the ticket to this ticket form." }),
+    customFields: CustomFieldValues.optional().meta({
+      description: "Custom field values to change, by field ID; null clears a field. Fields not given keep their value.",
+    }),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "No changes given" });
 export type UpdateTicketRequest = z.infer<typeof UpdateTicketRequest>;

@@ -12,7 +12,9 @@ export const TICKET_SYNC_JOBS = {
   one: "sync-one",
   backfill: "backfill",
   agents: "sync-agents",
-  /** Repeating job that enqueues `backfill` or `agents` for every connected tenant. */
+  /** Ticket forms and custom fields. */
+  forms: "sync-forms",
+  /** Repeating job that enqueues `backfill`, `agents`, or `forms` for every connected tenant. */
   fanOut: "fan-out",
 } as const;
 
@@ -29,8 +31,12 @@ export interface AgentSyncJob {
   tenantId: string;
 }
 
+export interface TicketFormSyncJob {
+  tenantId: string;
+}
+
 export interface FanOutJob {
-  job: typeof TICKET_SYNC_JOBS.backfill | typeof TICKET_SYNC_JOBS.agents;
+  job: typeof TICKET_SYNC_JOBS.backfill | typeof TICKET_SYNC_JOBS.agents | typeof TICKET_SYNC_JOBS.forms;
 }
 
 /** BullMQ connection options from a redis:// or rediss:// URL. */
