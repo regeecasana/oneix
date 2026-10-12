@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
 import {
+  BackendAgentOptionsResponse,
   BackendDirectoryResponse,
   InviteMemberRequest,
   InviteMemberResponse,
@@ -45,15 +46,27 @@ export class TeamController {
     return this.team.directory(admin);
   }
 
+  @Get("zendesk-options")
+  @ApiOperation({
+    summary: "Roles and groups for a new Zendesk agent",
+    description: "Read live from the workspace's Zendesk: Admin and the custom roles (or Agent), and the groups. Admins only.",
+  })
+  @ApiOkResponse({ standardSchema: BackendAgentOptionsResponse })
+  @ApiErrors(502, 503)
+  agentOptions(@CurrentUser() admin: SessionUser): Promise<BackendAgentOptionsResponse> {
+    return this.team.agentOptions(admin);
+  }
+
   @Post("invites")
   @ApiOperation({
     summary: "Invite someone",
     description:
-      "Gives a person access to the workspace with a oneix role, optionally linked to a Zendesk user. A new person " +
-      "gets an invite link to set their password; there is no email sending yet, so send it to them yourself.",
+      "Gives a person access to the workspace with a oneix role, linked to an existing Zendesk user, to a new " +
+      "Zendesk agent created now (`newZendeskAgent`: verified, so Zendesk emails them nothing), or not linked. " +
+      "A new person gets an invite link to set their password; there is no email sending yet, so send it yourself.",
   })
   @ApiCreatedResponse({ standardSchema: InviteMemberResponse })
-  @ApiErrors(400, 404, 409)
+  @ApiErrors(400, 404, 409, 502, 503)
   invite(
     @CurrentUser() admin: SessionUser,
     @Body({ schema: InviteMemberRequest }) body: z.output<typeof InviteMemberRequest>,

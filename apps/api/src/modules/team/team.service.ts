@@ -1,6 +1,7 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { AccountError, inviteToTenant, issueLink, linkBackendAgent, type OneTimeLink } from "@oneix/accounts";
 import type {
+  BackendAgentOptionsResponse,
   BackendDirectoryResponse,
   BackendUser,
   InviteMemberRequest,
@@ -11,9 +12,11 @@ import type {
   UpdateMemberRequest,
 } from "@oneix/contracts";
 import { type BackendAgent, type PrismaClient, scopedToTenant } from "@oneix/db";
+import { type TicketingRegistry, upsertBackendAgent } from "@oneix/tenancy";
+import { TicketingError } from "@oneix/ticketing";
 import type { z } from "zod";
 import type { SessionUser } from "../../common/auth.js";
-import { PRISMA } from "../../common/providers.module.js";
+import { PRISMA, TICKETING } from "../../common/providers.module.js";
 import { APP_CONFIG, type AppConfig } from "../../config/config.js";
 import { AuditService } from "../audit/audit.service.js";
 
@@ -35,8 +38,16 @@ export class TeamService {
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(PRISMA) private readonly prisma: PrismaClient,
+    @Inject(TICKETING) private readonly registry: TicketingRegistry,
     private readonly audit: AuditService,
   ) {}
+
+  /** The roles and groups a new Zendesk agent can be given, read live from the workspace's Zendesk. */
+  async agentOptions(admin: SessionUser): Promise<BackendAgentOptionsResponse> {
+    const ticketing = await this.registry.for(admin.tenantId);
+    const [roles, groups] = await Promise.all([ticketing.listAgentRoles(), ticketing.listGroups()]);
+    return { roles, groups: groups.map((g) => ({ id: g.externalId, name: g.name })) };
+  }
 
   async list(admin: SessionUser): Promise<TeamResponse> {
     const db = scopedToTenant(this.prisma, admin.tenantId);
@@ -94,12 +105,16 @@ export class TeamService {
   }
 
   async invite(admin: SessionUser, input: InviteInput): Promise<InviteMemberResponse> {
+    const zendeskUserId = input.newZendeskAgent
+      ? await this.createZendeskAgent(admin, input.name, input.email, input.newZendeskAgent)
+      : (input.zendeskUserId ?? null);
+
     const result = await inviteToTenant(this.prisma, {
       tenantId: admin.tenantId,
       email: input.email,
       name: input.name,
       role: input.role,
-      zendeskUserId: input.zendeskUserId ?? null,
+      zendeskUserId,
       createdById: admin.id,
     });
     await this.audit.record({
@@ -108,7 +123,7 @@ export class TeamService {
       action: "team.invited",
       targetType: "user",
       targetId: result.userId,
-      metadata: { role: input.role, zendeskUserId: input.zendeskUserId ?? null },
+      metadata: { role: input.role, zendeskUserId, createdZendeskAgent: input.newZendeskAgent !== undefined },
     });
     return { member: await this.member(admin, result.userId), link: result.link ? this.toLinkResponse(result.link) : null };
   }
@@ -160,6 +175,65 @@ export class TeamService {
       targetId: userId,
     });
     return this.toLinkResponse(link);
+  }
+
+  /**
+   * Creates the agent in the workspace's Zendesk, adds them to the directory, and returns their ID.
+   * Checked first, so a refused invite never leaves a stray Zendesk agent: the person mustn't already
+   * be in the workspace, and their email mustn't already belong to a Zendesk agent (link them instead).
+   */
+  private async createZendeskAgent(
+    admin: SessionUser,
+    name: string,
+    email: string,
+    agent: NonNullable<InviteInput["newZendeskAgent"]>,
+  ): Promise<string> {
+    const normalized = email.trim().toLowerCase();
+    const member = await this.prisma.tenantMembership.findFirst({
+      where: { tenantId: admin.tenantId, active: true, user: { email: normalized } },
+      select: { id: true },
+    });
+    if (member) throw new ConflictException("This person is already in the workspace.");
+
+    const existing = await this.prisma.backendAgent.findFirst({
+      where: { tenantId: admin.tenantId, provider: "zendesk", email: normalized },
+      select: { name: true },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `${existing.name} is already a Zendesk user with this email. Pick them in "Zendesk user" instead of creating a new one.`,
+      );
+    }
+
+    const ticketing = await this.registry.for(admin.tenantId);
+    let created;
+    try {
+      created = await ticketing.createAgent({
+        name,
+        email: normalized,
+        roleKey: agent.roleKey,
+        groupExternalIds: agent.groupIds,
+      });
+    } catch (error) {
+      // Zendesk's own reasons are useful here: a taken email, no free seat, an invalid role.
+      if (error instanceof TicketingError && error.status === 422) {
+        throw new BadRequestException(
+          `Zendesk couldn't create the agent: ${error.reasons.join(" ") || "it rejected the request."}`,
+        );
+      }
+      throw error;
+    }
+
+    await upsertBackendAgent(this.prisma, admin.tenantId, created);
+    await this.audit.record({
+      tenantId: admin.tenantId,
+      actorId: admin.id,
+      action: "team.zendesk_agent_created",
+      targetType: "backend_agent",
+      targetId: created.externalId,
+      metadata: { email: normalized, roleKey: agent.roleKey, groupIds: agent.groupIds },
+    });
+    return created.externalId;
   }
 
   private async member(admin: SessionUser, userId: string): Promise<TeamMember> {
