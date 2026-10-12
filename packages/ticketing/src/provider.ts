@@ -9,6 +9,15 @@ export interface TicketingProvider {
   getCurrentUser(): Promise<ExternalAgent>;
   /** Every agent and admin in the backend, including suspended ones. */
   listAgents(): Promise<ExternalAgent[]>;
+  /** The roles a new agent can be given, for example Admin, Agent, or a custom role such as Light agent. */
+  listAgentRoles(): Promise<ExternalAgentRole[]>;
+  /** The groups agents can belong to. */
+  listGroups(): Promise<ExternalGroup[]>;
+  /**
+   * Creates an agent in the backend, already verified so the backend sends them nothing: they work
+   * through oneix. Fails if the email belongs to an existing user or the plan has no free seat.
+   */
+  createAgent(input: NewAgent): Promise<ExternalAgent>;
   findOrCreateCustomer(identity: CustomerIdentity): Promise<ExternalCustomer>;
   createTicket(input: CreateTicketInput, actor?: Actor): Promise<ExternalTicket>;
   /** Returns null when the ticket does not exist. */
@@ -54,6 +63,27 @@ export interface AgentPermissions {
   publicReplies: boolean;
   /** Which tickets the agent may see in the backend. */
   ticketAccess: "all" | "groups" | "organization" | "assigned" | "requested";
+}
+
+export interface ExternalAgentRole {
+  /** Stable key: "admin", "agent", or "custom:<backend role ID>". */
+  key: string;
+  name: string;
+  /** Whether agents with this role may reply publicly. */
+  publicReplies: boolean;
+}
+
+export interface ExternalGroup {
+  externalId: string;
+  name: string;
+}
+
+export interface NewAgent {
+  name: string;
+  email: string;
+  /** An `ExternalAgentRole.key`. */
+  roleKey: string;
+  groupExternalIds: string[];
 }
 
 export interface CustomerIdentity {

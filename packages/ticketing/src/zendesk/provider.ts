@@ -4,10 +4,13 @@ import type {
   CreateTicketInput,
   CustomerIdentity,
   ExternalAgent,
+  ExternalAgentRole,
   ExternalComment,
+  ExternalGroup,
   ExternalCustomer,
   ExternalTicket,
   ListTicketsFilter,
+  NewAgent,
   NewComment,
   TicketChanges,
   TicketingProvider,
@@ -27,6 +30,8 @@ import {
 import type {
   CommentsResponse,
   CustomRolesResponse,
+  GroupMembershipResponse,
+  GroupsResponse,
   GroupMembershipsResponse,
   OrganizationMembershipsResponse,
   IncrementalTicketsResponse,
@@ -108,6 +113,63 @@ export class ZendeskProvider implements TicketingProvider {
       after = page.meta?.has_more ? (page.meta.after_cursor ?? undefined) : undefined;
     } while (after);
     return organizations;
+  }
+
+  async listAgentRoles(): Promise<ExternalAgentRole[]> {
+    const customRoles = await this.customRoles();
+    const admin: ExternalAgentRole = { key: "admin", name: "Admin", publicReplies: true };
+    if (!customRoles) return [admin, { key: "agent", name: "Agent", publicReplies: true }];
+    return [
+      admin,
+      ...[...customRoles.entries()].map(([id, role]) => ({
+        key: `custom:${id}`,
+        name: role.name,
+        publicReplies: role.publicComments,
+      })),
+    ];
+  }
+
+  async listGroups(): Promise<ExternalGroup[]> {
+    const groups: ExternalGroup[] = [];
+    let after: string | undefined;
+    do {
+      const page = await this.client.request<GroupsResponse>("GET", "/api/v2/groups.json", {
+        query: { "page[size]": 100, "page[after]": after },
+      });
+      groups.push(...page.groups.filter((g) => !g.deleted).map((g) => ({ externalId: String(g.id), name: g.name })));
+      after = page.meta?.has_more ? (page.meta.after_cursor ?? undefined) : undefined;
+    } while (after);
+    return groups;
+  }
+
+  async createAgent(input: NewAgent): Promise<ExternalAgent> {
+    const customRoleId = input.roleKey.startsWith("custom:") ? Number(input.roleKey.slice("custom:".length)) : null;
+    if (customRoleId !== null && !Number.isInteger(customRoleId)) throw new Error(`Invalid role: ${input.roleKey}`);
+    const role = input.roleKey === "admin" ? "admin" : "agent";
+
+    // POST /users (not create_or_update), so an existing customer with this email is never promoted
+    // by accident: Zendesk rejects the duplicate instead.
+    const { user } = await this.client.request<UserResponse>("POST", "/api/v2/users.json", {
+      body: {
+        user: {
+          name: input.name,
+          email: input.email,
+          role,
+          ...(customRoleId !== null ? { custom_role_id: customRoleId } : {}),
+          // Verified: Zendesk sends no verification or welcome email. The agent works through oneix.
+          verified: true,
+        },
+      },
+    });
+
+    for (const groupId of input.groupExternalIds) {
+      await this.client.request<GroupMembershipResponse>("POST", "/api/v2/group_memberships.json", {
+        body: { group_membership: { user_id: user.id, group_id: Number(groupId) } },
+      });
+    }
+
+    const customRoles = await this.customRoles();
+    return toAgent(user, customRoles, { groups: input.groupExternalIds });
   }
 
   /** The account's custom roles by ID, or undefined when they can't be read. */

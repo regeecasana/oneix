@@ -334,6 +334,77 @@ describe("ZendeskProvider", () => {
     expect(calls.filter((c) => c.url.pathname.includes("organization_memberships"))).toHaveLength(1);
   });
 
+  it("creates a verified agent with a custom role and groups", async () => {
+    const { zendesk, calls } = provider({
+      "POST /api/v2/users.json": () =>
+        json({ user: { id: 77, name: "New Agent", email: "new@acme.com", phone: null, role: "agent", role_type: 1, custom_role_id: 901 } }),
+      "POST /api/v2/group_memberships.json": (call) =>
+        json({ group_membership: { id: 1, user_id: 77, group_id: (call.body as { group_membership: { group_id: number } }).group_membership.group_id } }),
+      "GET /api/v2/custom_roles.json": () =>
+        json({ custom_roles: [{ id: 901, name: "Light agent", configuration: { ticket_comment_access: "none" } }] }),
+    });
+
+    const agent = await zendesk.createAgent({
+      name: "New Agent",
+      email: "new@acme.com",
+      roleKey: "custom:901",
+      groupExternalIds: ["500", "501"],
+    });
+
+    expect(calls.find((c) => c.method === "POST" && c.url.pathname === "/api/v2/users.json")?.body).toEqual({
+      user: { name: "New Agent", email: "new@acme.com", role: "agent", custom_role_id: 901, verified: true },
+    });
+    expect(calls.filter((c) => c.url.pathname === "/api/v2/group_memberships.json").map((c) => c.body)).toEqual([
+      { group_membership: { user_id: 77, group_id: 500 } },
+      { group_membership: { user_id: 77, group_id: 501 } },
+    ]);
+    expect(agent).toMatchObject({
+      externalId: "77",
+      roleNames: ["Light agent"],
+      groupExternalIds: ["500", "501"],
+      permissions: { publicReplies: false },
+    });
+  });
+
+  it("explains why Zendesk rejected a new agent", async () => {
+    const { zendesk } = provider({
+      "POST /api/v2/users.json": () =>
+        json(
+          {
+            error: "RecordInvalid",
+            description: "Record validation errors",
+            details: { email: [{ description: "Email: new@acme.com is already being used by another user" }] },
+          },
+          422,
+        ),
+    });
+
+    const error = await zendesk
+      .createAgent({ name: "New", email: "new@acme.com", roleKey: "agent", groupExternalIds: [] })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(TicketingError);
+    expect(error).toMatchObject({ status: 422, reasons: ["Email: new@acme.com is already being used by another user"] });
+  });
+
+  it("offers Admin and the custom roles as agent roles", async () => {
+    const { zendesk } = provider({
+      "GET /api/v2/custom_roles.json": () =>
+        json({
+          custom_roles: [
+            { id: 900, name: "Staff", configuration: { ticket_comment_access: "public" } },
+            { id: 901, name: "Light agent", configuration: { ticket_comment_access: "none" } },
+          ],
+        }),
+    });
+
+    expect(await zendesk.listAgentRoles()).toEqual([
+      { key: "admin", name: "Admin", publicReplies: true },
+      { key: "custom:900", name: "Staff", publicReplies: true },
+      { key: "custom:901", name: "Light agent", publicReplies: false },
+    ]);
+  });
+
   it("refreshes the token once when it is rejected", async () => {
     let tokenCalls = 0;
     let ticketCalls = 0;

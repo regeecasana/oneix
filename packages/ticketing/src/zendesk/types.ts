@@ -45,6 +45,15 @@ export interface OrganizationMembershipsResponse {
   meta?: { has_more: boolean; after_cursor: string | null };
 }
 
+export interface GroupsResponse {
+  groups: { id: number; name: string; deleted?: boolean }[];
+  meta?: { has_more: boolean; after_cursor: string | null };
+}
+
+export interface GroupMembershipResponse {
+  group_membership: { id: number; user_id: number; group_id: number };
+}
+
 export interface CustomRolesResponse {
   custom_roles: { id: number; name: string; configuration?: { ticket_comment_access?: "public" | "none" | string } }[];
 }

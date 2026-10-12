@@ -105,6 +105,7 @@ export class ZendeskClient {
         response.status,
         response.status === 429 || response.status >= 500,
         retryAfterMs,
+        reasonsFrom(detail),
       );
     }
   }
@@ -151,6 +152,26 @@ export class ZendeskClient {
     const ttlMs = (body.expires_in ?? 3600) * 1000;
     this.token = { value: body.access_token, expiresAt: Date.now() + ttlMs };
     return this.token.value;
+  }
+}
+
+/**
+ * Zendesk explains rejected requests as `{ error, description, details: { field: [{ description }] } }`.
+ * Returns the most specific descriptions it gives.
+ */
+export function reasonsFrom(body: string): string[] {
+  try {
+    const parsed = JSON.parse(body) as {
+      description?: unknown;
+      details?: Record<string, { description?: unknown }[] | undefined>;
+    };
+    const details = Object.values(parsed.details ?? {})
+      .flat()
+      .flatMap((d) => (typeof d?.description === "string" ? [d.description] : []));
+    if (details.length > 0) return details;
+    return typeof parsed.description === "string" ? [parsed.description] : [];
+  } catch {
+    return [];
   }
 }
 

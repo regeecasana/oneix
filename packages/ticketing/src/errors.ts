@@ -11,6 +11,11 @@ export class TicketingError extends Error {
     readonly retryable: boolean,
     /** Milliseconds the backend asked us to wait, when it said. */
     readonly retryAfterMs?: number,
+    /**
+     * The backend's own explanation of a rejected request, for example "Email is already being used".
+     * Safe to show when acting on the backend directly, such as creating an agent.
+     */
+    readonly reasons: string[] = [],
   ) {
     super(message);
     this.name = "TicketingError";
