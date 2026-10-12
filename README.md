@@ -33,9 +33,9 @@ oneix is a B2B product: each client is a **tenant** with its own Zendesk instanc
 
 | App | URL | What it does |
 |---|---|---|
-| `apps/web` | http://localhost:3000 | Agent workspace: sign-in, client switcher, inbox, ticket view with replies and notes |
+| `apps/web` | http://localhost:3000 | Agent workspace: sign-in, client switcher, inbox, ticket view with replies, notes, and the ticket form, Team page |
 | `apps/api` | http://localhost:4000 | REST API, per-tenant Zendesk webhooks. Health check at `/health`. API docs at [/docs](http://localhost:4000/docs) |
-| `apps/worker` | — | Processes webhooks, keeps each tenant's ticket cache and agents in sync with its Zendesk. Also hosts the tenant CLI |
+| `apps/worker` | — | Processes webhooks, keeps each tenant's ticket cache, agents, and ticket forms in sync with its Zendesk. Also hosts the tenant CLI |
 
 How tenants work:
 
@@ -50,7 +50,8 @@ How ticket data moves:
 
 - **Inbox** reads from each tenant's ticket cache in PostgreSQL, so it stays fast and does not use Zendesk API calls.
 - **Ticket view** reads the ticket and its thread from Zendesk directly, and refreshes the cache on the way.
-- **Changes** (public replies, internal notes, status, priority, assignee) are written to Zendesk as the signed-in agent. Zendesk emails public replies to the customer.
+- **Changes** (public replies, internal notes, status, priority, assignee, ticket form, custom fields) are written to Zendesk as the signed-in agent. Zendesk emails public replies to the customer.
+- **Ticket forms and custom fields** are copied from each tenant's Zendesk every hour. A ticket shows its form's fields in the form's order; fields appear and become required as other fields change, following the form's conditions. oneix enforces what Zendesk's own agent workspace does: values must fit their field, and a status can't be set while fields it requires are empty or a dropdown option doesn't allow solving. Zendesk's API enforces none of this, so oneix does.
 - **Cache freshness** comes from two sources per tenant: a Zendesk webhook for each ticket change, and a backfill every 5 minutes that catches anything missed. The first backfill imports all existing tickets.
 
 See [Accounts and sign-in](#accounts-and-sign-in) for how people get access.
@@ -107,6 +108,7 @@ Generate the encryption key with `openssl rand -base64 32`, or let `npm start` d
 oneix has its own accounts: an email and password, never a Zendesk login.
 
 1. **An admin invites someone** from the **Team** page (workspace admins) or the CLI (oneix operations): their name, email, oneix role, and the Zendesk user to link. Picking the Zendesk user fills in the name and email.
+   - **Someone who isn't in Zendesk yet:** **Create agent** on the Team page (or "Create a new Zendesk agent" in the Zendesk user picker) creates them in the client's Zendesk with the chosen Zendesk role and groups, and links the account. The agent is created verified, so Zendesk emails them nothing; they only use oneix. A full agent uses a Zendesk seat.
 2. **oneix creates an invite link.** There is no email sending yet, so the admin copies the link and sends it. It works once and expires after 7 days.
 3. **The person sets a password** from the link and is signed in.
 
@@ -141,6 +143,7 @@ Credentials are read from `ZENDESK_EMAIL` and `ZENDESK_API_TOKEN` (or the other 
 | `npm run tenant -- list` | Every tenant with its Zendesk, connection status, webhook, agents, and cached tickets |
 | `npm run tenant -- add ...` | Creates a tenant, or updates one, for example to rotate credentials |
 | `npm run tenant -- sync-agents --slug acme` | Provisions agents from Zendesk now instead of waiting for the hourly sync |
+| `npm run tenant -- sync-forms --slug acme` | Copies ticket forms and custom fields from Zendesk now instead of waiting for the hourly sync |
 | `npm run tenant -- resync-tickets --slug acme` | Re-imports every ticket, for example after an upgrade adds a ticket field |
 | `npm run tenant -- set-webhook-secret --slug acme --secret ...` | Stores the signing secret of the tenant's Zendesk webhook |
 | `npm run tenant -- disable --slug acme` | Stops all Zendesk traffic for the tenant. `enable` resumes it |
@@ -265,6 +268,7 @@ All variables are listed in [.env.example](.env.example), grouped by app. The ap
 | `WEB_ORIGIN` | api | Allowed browser origin (CORS) |
 | `TICKET_BACKFILL_INTERVAL_MINUTES` | worker | How often each tenant's ticket cache is backfilled |
 | `AGENT_SYNC_INTERVAL_MINUTES` | worker | How often each tenant's agents are provisioned from Zendesk |
+| `TICKET_FORM_SYNC_INTERVAL_MINUTES` | worker | How often each tenant's ticket forms and custom fields are copied from Zendesk |
 | `NEXT_PUBLIC_API_URL` | web | Where the workspace calls the API |
 
 Zendesk credentials are never given to the web app.
