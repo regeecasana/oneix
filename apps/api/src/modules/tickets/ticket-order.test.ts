@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ticketOrderBy } from "./tickets.service.js";
+import { searchWhere, ticketOrderBy } from "./tickets.service.js";
 
 describe("ticketOrderBy", () => {
   it("defaults to the most recent update with the ID as tie-breaker", () => {
@@ -23,5 +23,21 @@ describe("ticketOrderBy", () => {
   it("keeps tickets without a priority last in both directions", () => {
     expect(ticketOrderBy("priority", "asc")[0]).toEqual({ priority: { sort: "asc", nulls: "last" } });
     expect(ticketOrderBy("priority", "desc")[0]).toEqual({ priority: { sort: "desc", nulls: "last" } });
+  });
+});
+
+describe("searchWhere", () => {
+  it("matches the subject and customer, case-insensitively", () => {
+    const where = searchWhere("refund");
+    expect(where.OR).toEqual([
+      { subject: { contains: "refund", mode: "insensitive" } },
+      { customer: { name: { contains: "refund", mode: "insensitive" } } },
+      { customer: { email: { contains: "refund", mode: "insensitive" } } },
+    ]);
+  });
+
+  it("also matches the ticket number, with or without #", () => {
+    expect(searchWhere("#8602").OR).toContainEqual({ number: 8602 });
+    expect(searchWhere("8602").OR).toContainEqual({ number: 8602 });
   });
 });

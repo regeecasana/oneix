@@ -1,4 +1,4 @@
-import type { ThreadEntry, TicketSummary } from "@oneix/contracts";
+import type { CustomFieldValues, ThreadEntry, TicketSummary } from "@oneix/contracts";
 import type { Prisma } from "@oneix/db";
 import type { ExternalComment } from "@oneix/ticketing";
 
@@ -24,16 +24,30 @@ export function toTicketSummary(row: TicketRow): TicketSummary {
   };
 }
 
+/** The cached custom field values; the column holds a JSON object of values by field ID. */
+export function customFieldsOf(row: { customFields: unknown }): CustomFieldValues {
+  return (row.customFields ?? {}) as CustomFieldValues;
+}
+
 /**
  * @param agentNames oneix names keyed by backend user ID, so agents show as they appear in oneix.
+ * @param viewerExternalId the backend user the signed-in agent is linked to, to mark their own comments.
  */
-export function toThreadEntry(comment: ExternalComment, agentNames: Map<string, string>): ThreadEntry {
+export function toThreadEntry(
+  comment: ExternalComment,
+  agentNames: Map<string, string>,
+  viewerExternalId: string | null,
+): ThreadEntry {
   const oneixName = comment.author.externalId ? agentNames.get(comment.author.externalId) : undefined;
   return {
     id: comment.externalId,
     kind: comment.public ? "message" : "internal_note",
     body: comment.body,
-    author: { name: oneixName ?? comment.author.name, type: comment.author.type },
+    author: {
+      name: oneixName ?? comment.author.name,
+      type: comment.author.type,
+      isYou: viewerExternalId !== null && comment.author.externalId === viewerExternalId,
+    },
     createdAt: comment.createdAt.toISOString(),
   };
 }
