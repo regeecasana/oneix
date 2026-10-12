@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@oneix/accounts": "*",
     "@oneix/db": "*",
     "@oneix/ticketing": "*"
   },

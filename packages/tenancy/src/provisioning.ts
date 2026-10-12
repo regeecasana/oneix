@@ -1,86 +1,76 @@
-import type { PrismaClient, UserRole } from "@oneix/db";
-import type { ExternalAgent, TicketingProvider } from "@oneix/ticketing";
+import { permissionsFrom } from "@oneix/accounts";
+import type { PrismaClient } from "@oneix/db";
+import type { TicketingProvider } from "@oneix/ticketing";
 
 export interface AgentSyncResult {
-  /** Agents with an active membership after the sync. */
-  active: number;
-  /** Memberships deactivated because the agent was removed or suspended in the backend. */
+  /** Agents and admins in the tenant's backend directory after the sync. */
+  directory: number;
+  /** oneix accounts linked to a backend user, whose permissions were refreshed. */
+  linked: number;
+  /** Linked accounts that lost access because their backend user was removed or suspended. */
   deactivated: number;
-  /** Backend agents skipped because they have no email to sign in with. */
-  skipped: number;
 }
 
 /**
- * Makes the tenant's oneix agents match its backend agents.
+ * Refreshes the tenant's directory of backend users (Zendesk agents and admins) and the
+ * permissions of the oneix accounts linked to them.
  *
- * Each backend agent or admin becomes a oneix user (matched by email) with a membership in the tenant,
- * linked by backend user ID. Agents removed or suspended in the backend lose access to the tenant.
- * Memberships not linked to the backend are left alone.
+ * The directory never grants access: oneix accounts are invited, then linked to a directory
+ * entry. A linked account whose backend user is removed or suspended loses access to the
+ * workspace; an admin turns it back on.
  */
 export async function syncAgents(
   prisma: PrismaClient,
   tenantId: string,
   ticketing: TicketingProvider,
 ): Promise<AgentSyncResult> {
-  const agents = await ticketing.listAgents();
-  const result: AgentSyncResult = { active: 0, deactivated: 0, skipped: 0 };
-  const activeIds = new Set<string>();
+  const agents = (await ticketing.listAgents()).filter((agent) => agent.role !== "end_user");
+  const syncedAt = new Date();
+  const result: AgentSyncResult = { directory: 0, linked: 0, deactivated: 0 };
 
   for (const agent of agents) {
-    if (!agent.email || agent.role === "end_user") {
-      result.skipped++;
-      continue;
-    }
-    if (!agent.active) continue;
+    const data = {
+      name: agent.name,
+      email: agent.email?.toLowerCase() ?? null,
+      role: agent.role === "admin" ? ("admin" as const) : ("agent" as const),
+      roleNames: agent.roleNames,
+      canReplyPublicly: agent.permissions.publicReplies,
+      ticketAccess: agent.permissions.ticketAccess,
+      groupExternalIds: agent.groupExternalIds,
+      organizationExternalIds: agent.organizationExternalIds,
+      active: agent.active,
+      syncedAt,
+    };
+    const row = await prisma.backendAgent.upsert({
+      where: { tenantId_provider_externalId: { tenantId, provider: "zendesk", externalId: agent.externalId } },
+      create: { tenantId, provider: "zendesk", externalId: agent.externalId, ...data },
+      update: data,
+    });
+    result.directory++;
 
-    await upsertMembership(prisma, tenantId, agent as ExternalAgent & { email: string });
-    activeIds.add(agent.externalId);
-    result.active++;
+    if (!agent.active) continue;
+    const updated = await prisma.tenantMembership.updateMany({
+      where: { tenantId, zendeskUserId: agent.externalId },
+      data: permissionsFrom(row),
+    });
+    result.linked += updated.count;
   }
 
-  const stale = await prisma.tenantMembership.updateMany({
-    where: { tenantId, active: true, zendeskUserId: { not: null, notIn: [...activeIds] } },
+  // Users no longer returned by the backend have been deleted there.
+  const returned = agents.map((agent) => agent.externalId);
+  await prisma.backendAgent.updateMany({
+    where: { tenantId, provider: "zendesk", externalId: { notIn: returned }, active: true },
+    data: { active: false, syncedAt },
+  });
+
+  const inactive = await prisma.backendAgent.findMany({
+    where: { tenantId, provider: "zendesk", active: false },
+    select: { externalId: true },
+  });
+  const removed = await prisma.tenantMembership.updateMany({
+    where: { tenantId, active: true, zendeskUserId: { in: inactive.map((agent) => agent.externalId) } },
     data: { active: false },
   });
-  result.deactivated = stale.count;
+  result.deactivated = removed.count;
   return result;
-}
-
-async function upsertMembership(
-  prisma: PrismaClient,
-  tenantId: string,
-  agent: ExternalAgent & { email: string },
-): Promise<void> {
-  const email = agent.email.toLowerCase();
-  const role: UserRole = agent.role === "admin" ? "admin" : "agent";
-
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: { email, name: agent.name },
-    update: { name: agent.name },
-    select: { id: true },
-  });
-
-  // The backend ID is the stable link. If it is already linked to another user
-  // (the agent's email changed in the backend), that membership moves to this user.
-  const linked = await prisma.tenantMembership.findUnique({
-    where: { tenantId_zendeskUserId: { tenantId, zendeskUserId: agent.externalId } },
-    select: { id: true, userId: true },
-  });
-  if (linked && linked.userId !== user.id) {
-    await prisma.tenantMembership.update({ where: { id: linked.id }, data: { zendeskUserId: null, active: false } });
-  }
-
-  const permissions = {
-    roleNames: agent.roleNames,
-    canReplyPublicly: agent.permissions.publicReplies,
-    ticketAccess: agent.permissions.ticketAccess,
-    groupExternalIds: agent.groupExternalIds,
-    organizationExternalIds: agent.organizationExternalIds,
-  };
-  await prisma.tenantMembership.upsert({
-    where: { tenantId_userId: { tenantId, userId: user.id } },
-    create: { tenantId, userId: user.id, role, zendeskUserId: agent.externalId, ...permissions },
-    update: { role, zendeskUserId: agent.externalId, active: true, ...permissions },
-  });
 }
