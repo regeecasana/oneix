@@ -147,7 +147,8 @@ Routing a takeover to the specific agent who clicked the button depends on CXone
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/tickets` | List tickets with filters |
+| GET | `/tickets` | List tickets with filters (`status` and `priority` take comma-separated lists, `none` for no priority; `assignee`, `channel`), sorting (`sort`, `order`), and pages (`page`, `pageSize`) |
+| GET | `/tickets/channel-counts` | Tickets per channel (email, chat, messaging, Sunshine Conversations, social, phone, web form, API, other) for the inbox tabs |
 | GET | `/tickets/:id` | Ticket with conversation thread |
 | PATCH | `/tickets/:id` | Update status, priority, assignee |
 | POST | `/tickets/:id/comments` | Public reply (emailed to the customer) or internal note, optionally changing the status |

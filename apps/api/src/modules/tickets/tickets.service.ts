@@ -1,5 +1,12 @@
+import { NO_PRIORITY } from "@oneix/contracts";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type {
+  ChannelCountsQuery,
+  ChannelCountsResponse,
+  SortOrder,
+  TicketPriority,
+  TicketChannel,
+  TicketSortField,
   AddCommentRequest,
   ListTicketsQuery,
   ListTicketsResponse,
@@ -18,6 +25,7 @@ import { ticketAccessWhere } from "./ticket-access.js";
 import { type TicketRow, ticketInclude, toThreadEntry, toTicketSummary } from "./tickets.mapper.js";
 
 type ListQuery = z.output<typeof ListTicketsQuery>;
+type CountsQuery = z.output<typeof ChannelCountsQuery>;
 
 @Injectable()
 export class TicketsService {
@@ -30,19 +38,14 @@ export class TicketsService {
   /** Inbox list, served from the cache, one page at a time, newest activity first. */
   async list(user: SessionUser, query: ListQuery): Promise<ListTicketsResponse> {
     const db = this.db(user);
-    const filters: Prisma.TicketWhereInput = {};
-    if (query.status) filters.status = query.status;
-    if (query.assignee === "me") filters.assigneeId = user.id;
-    else if (query.assignee === "unassigned") filters.assigneeId = null;
-    else if (query.assignee) filters.assigneeId = query.assignee;
-    const where: Prisma.TicketWhereInput = { AND: [filters, ticketAccessWhere(user)] };
+    const where = this.inboxWhere(user, query, query.channel);
 
     const [total, rows] = await db.$transaction([
       db.ticket.count({ where }),
       db.ticket.findMany({
         where,
         include: ticketInclude,
-        orderBy: [{ externalUpdatedAt: "desc" }, { id: "desc" }],
+        orderBy: ticketOrderBy(query.sort, query.order),
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
       }),
@@ -55,6 +58,38 @@ export class TicketsService {
       total,
       totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
     };
+  }
+
+  /** Tickets per channel under the same filters as the inbox, for its tabs. */
+  async channelCounts(user: SessionUser, query: CountsQuery): Promise<ChannelCountsResponse> {
+    const groups = await this.db(user).ticket.groupBy({
+      by: ["channel"],
+      where: this.inboxWhere(user, query),
+      _count: { _all: true },
+    });
+    const channels = groups
+      .map((g) => ({ channel: g.channel, count: g._count._all }))
+      .filter((c) => c.count > 0)
+      .sort((a, b) => b.count - a.count);
+    return { total: channels.reduce((sum, c) => sum + c.count, 0), channels };
+  }
+
+  /** The inbox's filters, within what the agent may see. */
+  private inboxWhere(user: SessionUser, query: CountsQuery, channel?: TicketChannel): Prisma.TicketWhereInput {
+    const filters: Prisma.TicketWhereInput = {};
+    if (channel) filters.channel = channel;
+    if (query.status) filters.status = { in: query.status };
+    if (query.priority) {
+      const priorities = query.priority.filter((p): p is TicketPriority => p !== NO_PRIORITY);
+      filters.OR = [
+        ...(priorities.length > 0 ? [{ priority: { in: priorities } }] : []),
+        ...(query.priority.includes(NO_PRIORITY) ? [{ priority: null }] : []),
+      ];
+    }
+    if (query.assignee === "me") filters.assigneeId = user.id;
+    else if (query.assignee === "unassigned") filters.assigneeId = null;
+    else if (query.assignee) filters.assigneeId = query.assignee;
+    return { AND: [filters, ticketAccessWhere(user)] };
   }
 
   /** Ticket with its thread. Reads the backend directly and refreshes the cache on the way. */
@@ -164,6 +199,27 @@ export class TicketsService {
     }
     return assignee.zendeskUserId;
   }
+}
+
+/**
+ * Sort order for the inbox. Empty values (no customer name, no priority) sort last in both
+ * directions, and ties fall back to the most recent update, then ID, so pages never overlap.
+ */
+export function ticketOrderBy(sort: TicketSortField, order: SortOrder): Prisma.TicketOrderByWithRelationInput[] {
+  const byField: Record<TicketSortField, Prisma.TicketOrderByWithRelationInput> = {
+    number: { number: order },
+    subject: { subject: order },
+    channel: { channel: order },
+    customer: { customer: { name: { sort: order, nulls: "last" } } },
+    status: { status: order },
+    priority: { priority: { sort: order, nulls: "last" } },
+    assignee: { assignee: { name: order } },
+    updatedAt: { externalUpdatedAt: order },
+  };
+  const primary = byField[sort];
+  const tieBreakers: Prisma.TicketOrderByWithRelationInput[] =
+    sort === "updatedAt" ? [{ id: "desc" }] : [{ externalUpdatedAt: "desc" }, { id: "desc" }];
+  return [primary, ...tieBreakers];
 }
 
 function actorOf(user: SessionUser): Actor {

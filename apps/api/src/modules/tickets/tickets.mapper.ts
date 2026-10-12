@@ -18,6 +18,8 @@ export function toTicketSummary(row: TicketRow): TicketSummary {
     priority: row.priority,
     customer: row.customer,
     assignee: row.assignee,
+    channel: row.channel,
+    channelDetail: row.channelDetail,
     updatedAt: row.externalUpdatedAt.toISOString(),
   };
 }

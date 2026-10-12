@@ -28,6 +28,21 @@ export const CustomerSummary = z.object({
 });
 export type CustomerSummary = z.infer<typeof CustomerSummary>;
 
+/** How a ticket reached support, grouped for the inbox tabs. */
+export const TICKET_CHANNELS = [
+  "email",
+  "chat",
+  "messaging",
+  "sunshine_conversations",
+  "social",
+  "phone",
+  "web_form",
+  "api",
+  "other",
+] as const;
+export const TicketChannel = z.enum(TICKET_CHANNELS);
+export type TicketChannel = z.infer<typeof TicketChannel>;
+
 export const TicketSummary = z.object({
   id: z.string(),
   number: z.number().int(),
@@ -36,6 +51,9 @@ export const TicketSummary = z.object({
   priority: TicketPriority.nullable(),
   customer: CustomerSummary.nullable(),
   assignee: PersonRef.nullable(),
+  channel: TicketChannel,
+  /** The specific source within the channel, for example "WhatsApp" under social. */
+  channelDetail: z.string().nullable(),
   updatedAt: z.iso.datetime(),
 });
 export type TicketSummary = z.infer<typeof TicketSummary>;
@@ -57,16 +75,74 @@ export const TicketDetail = TicketSummary.extend({
 });
 export type TicketDetail = z.infer<typeof TicketDetail>;
 
+/** Filter value for tickets without a priority. */
+export const NO_PRIORITY = "none" as const;
+export const PriorityFilter = z.union([TicketPriority, z.literal(NO_PRIORITY)]);
+export type PriorityFilter = z.infer<typeof PriorityFilter>;
+
+/** Splits a comma-separated query parameter: `status=open,pending`. */
+const splitList = (value: string) =>
+  value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+/** One or more statuses as a query parameter. */
+const StatusList = z.string().transform(splitList).pipe(z.array(TicketStatus).min(1));
+/** One or more priorities as a query parameter, `none` for tickets without one. */
+const PriorityList = z.string().transform(splitList).pipe(z.array(PriorityFilter).min(1));
+
+/** Columns the inbox can be sorted by. */
+export const TICKET_SORT_FIELDS = [
+  "number",
+  "subject",
+  "channel",
+  "customer",
+  "status",
+  "priority",
+  "assignee",
+  "updatedAt",
+] as const;
+export const TicketSortField = z.enum(TICKET_SORT_FIELDS);
+export type TicketSortField = z.infer<typeof TicketSortField>;
+
+export const SortOrder = z.enum(["asc", "desc"]);
+export type SortOrder = z.infer<typeof SortOrder>;
+
 export const ListTicketsQuery = z.object({
-  status: TicketStatus.optional(),
+  /** One or more statuses: `open,pending`. */
+  status: StatusList.optional(),
+  /** One or more priorities, `none` for tickets without one: `high,urgent`. */
+  priority: PriorityList.optional(),
   /** `me`, `unassigned`, or a user ID. Omit for all tickets. */
   assignee: z.string().min(1).optional(),
+  channel: TicketChannel.optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  /** Defaults to the most recently updated first. */
+  sort: TicketSortField.default("updatedAt"),
+  order: SortOrder.default("desc"),
 });
 export type ListTicketsQuery = z.input<typeof ListTicketsQuery>;
 
 export const ListTicketsResponse = paginated(TicketSummary);
+
+/** Filters for the channel counts: the list's filters, without the channel itself. */
+export const ChannelCountsQuery = z.object({
+  /** One or more statuses: `open,pending`. */
+  status: StatusList.optional(),
+  /** One or more priorities, `none` for tickets without one: `high,urgent`. */
+  priority: PriorityList.optional(),
+  assignee: z.string().min(1).optional(),
+});
+export type ChannelCountsQuery = z.input<typeof ChannelCountsQuery>;
+
+/** Tickets per channel for the inbox tabs. Channels with no tickets are left out. */
+export const ChannelCountsResponse = z.object({
+  total: z.number().int(),
+  channels: z.array(z.object({ channel: TicketChannel, count: z.number().int() })),
+});
+export type ChannelCountsResponse = z.infer<typeof ChannelCountsResponse>;
 export type ListTicketsResponse = z.infer<typeof ListTicketsResponse>;
 
 export const UpdateTicketRequest = z

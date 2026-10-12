@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import {
   AddCommentRequest,
+  ChannelCountsQuery,
+  type ChannelCountsResponse,
   ListTicketsQuery,
   type ListTicketsResponse,
   type TicketDetail,
@@ -22,6 +24,15 @@ export class TicketsController {
     @Query(new ZodPipe(ListTicketsQuery)) query: z.output<typeof ListTicketsQuery>,
   ): Promise<ListTicketsResponse> {
     return this.tickets.list(user, query);
+  }
+
+  /** Ticket counts per channel for the inbox tabs. Declared before `:id` so it isn't read as an ID. */
+  @Get("channel-counts")
+  channelCounts(
+    @CurrentUser() user: SessionUser,
+    @Query(new ZodPipe(ChannelCountsQuery)) query: z.output<typeof ChannelCountsQuery>,
+  ): Promise<ChannelCountsResponse> {
+    return this.tickets.channelCounts(user, query);
   }
 
   @Get(":id")
