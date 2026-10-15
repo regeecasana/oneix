@@ -14,6 +14,7 @@ import { StatusBadge } from "@/features/tickets/labels"
 import { useTicket } from "@/features/tickets/queries"
 import { Thread } from "@/features/tickets/thread"
 import { TicketProperties } from "@/features/tickets/ticket-properties"
+import { LiveCallBanner } from "@/features/voice/voice-ui"
 
 /**
  * A ticket fills the screen: the conversation on the left with the composer docked under it, and
@@ -61,6 +62,8 @@ export default function TicketPage() {
           {ticket.isFetching && <Spinner className="size-4" />}
         </span>
       </header>
+
+      <LiveCallBanner ticketNumber={data.number} />
 
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
         <section className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1">

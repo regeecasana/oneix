@@ -24,6 +24,7 @@ import { timeAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { channelIcons, channelLabels } from "./channels"
 import { priorityLabels, StatusBadge } from "./labels"
+import { LiveCallsList, useLiveCallCount } from "@/features/voice/voice-ui"
 import { type TicketFilters, useChannelCounts, useTicketList } from "./queries"
 
 const ALL = "all"
@@ -140,6 +141,7 @@ export function TicketListPanel() {
       </SidebarHeader>
 
       <SidebarContent className={cn("gap-0", list.isPlaceholderData && "opacity-60")}>
+        <LiveCallsSection />
         {list.isPending &&
           Array.from({ length: 8 }, (_, i) => (
             <div key={i} className="flex flex-col gap-2 border-b p-4">
@@ -165,6 +167,18 @@ export function TicketListPanel() {
         />
       </SidebarContent>
     </>
+  )
+}
+
+/** Live calls above the tickets, while there are any. */
+function LiveCallsSection() {
+  const count = useLiveCallCount()
+  if (count === 0) return null
+  return (
+    <div className="border-b-4 border-sidebar-border">
+      <p className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground">Live calls · {count}</p>
+      <LiveCallsList compact />
+    </div>
   )
 }
 

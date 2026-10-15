@@ -1,6 +1,6 @@
 "use client"
 
-import { Check, ChevronsUpDown, Inbox, KeyRound, Link2, LogOut, Moon, Sun, Users } from "lucide-react"
+import { Check, ChevronsUpDown, Inbox, KeyRound, Link2, LogOut, Moon, PhoneCall, Sun, Users } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
@@ -38,9 +38,19 @@ import { useLogout, useMe, useSwitchTenant } from "@/features/auth/queries"
 import { RoleBadge } from "@/features/tickets/labels"
 import { TicketListPanel } from "@/features/tickets/ticket-list-panel"
 import { initials } from "@/features/tickets/thread"
+import { usePresence, usePresenceHeartbeat, useVoiceEvents } from "@/features/voice/queries"
+import { SoftphoneProvider } from "@/features/voice/softphone"
+import {
+  ActiveCallBar,
+  IncomingCallDialog,
+  LiveCallsList,
+  PresenceControl,
+  useLiveCallCount,
+} from "@/features/voice/voice-ui"
 
 const nav = [
   { href: "/inbox", label: "Inbox", icon: Inbox, matches: ["/inbox", "/tickets"], adminOnly: false },
+  { href: "/calls", label: "Live calls", icon: PhoneCall, matches: ["/calls"], adminOnly: false },
   { href: "/team", label: "Team", icon: Users, matches: ["/team"], adminOnly: true },
 ]
 
@@ -53,7 +63,6 @@ type Me = NonNullable<ReturnType<typeof useMe>["data"]>
  */
 export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   const me = useMe()
-  const pathname = usePathname()
 
   if (me.isPending) {
     return (
@@ -74,12 +83,22 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
     )
   }
 
-  const items = nav.filter((item) => !item.adminOnly || me.data.role === "admin")
+  return <Workspace me={me.data}>{children}</Workspace>
+}
+
+/** The signed-in workspace: sidebar, header, and the page. */
+function Workspace({ me, children }: { me: Me; children: ReactNode }) {
+  const pathname = usePathname()
+  const presence = usePresence()
+  const items = nav.filter((item) => !item.adminOnly || me.role === "admin")
   const current = items.find((item) => item.matches.some((prefix) => pathname.startsWith(prefix)))
-  // The ticket list sits beside an open ticket; the inbox page has the full table instead.
-  const listPanel = pathname.startsWith("/tickets/")
+  // The ticket list sits beside an open ticket, and the live calls beside the calls page; the inbox
+  // page has the full table instead.
+  const panel = pathname.startsWith("/tickets/") ? "tickets" : pathname.startsWith("/calls") ? "calls" : null
+  const listPanel = panel !== null
 
   return (
+    <VoiceShell>
     <SidebarProvider
       style={{ "--sidebar-width": listPanel ? "22rem" : "calc(var(--sidebar-width-icon) + 1px)" } as CSSProperties}
     >
@@ -87,7 +106,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
         {/* The rail: always icons only. */}
         <Sidebar collapsible="none" className="w-[calc(var(--sidebar-width-icon)+1px)]! border-r">
           <SidebarHeader>
-            <WorkspaceSwitcher me={me.data} />
+            <WorkspaceSwitcher me={me} />
           </SidebarHeader>
           <SidebarContent>
             <SidebarGroup>
@@ -102,7 +121,10 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
                         className="px-2.5 md:px-2"
                       >
                         <Link href={item.href}>
-                          <item.icon />
+                          <span className="relative">
+                            <item.icon />
+                            {item.href === "/calls" && <LiveCallCount />}
+                          </span>
                           <span>{item.label}</span>
                         </Link>
                       </SidebarMenuButton>
@@ -113,13 +135,13 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
             </SidebarGroup>
           </SidebarContent>
           <SidebarFooter>
-            <AccountMenu me={me.data} />
+            <AccountMenu me={me} />
           </SidebarFooter>
         </Sidebar>
 
         {listPanel && (
           <Sidebar collapsible="none" className="hidden min-w-0 flex-1 md:flex">
-            <TicketListPanel />
+            {panel === "tickets" ? <TicketListPanel /> : <LiveCallsPanel />}
           </Sidebar>
         )}
       </Sidebar>
@@ -129,13 +151,17 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
         <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-4">
           {listPanel && (
             <>
-              <SidebarTrigger className="-ml-1" aria-label="Show or hide the ticket list" />
+              <SidebarTrigger className="-ml-1" aria-label="Show or hide the list" />
               <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
             </>
           )}
           <span className="text-sm font-medium">{current?.label}</span>
+          <div className="ml-auto flex items-center gap-3">
+            <ActiveCallBar />
+            <PresenceControl presence={presence.data} />
+          </div>
         </header>
-        {!me.data.permissions.linked && (
+        {!me.permissions.linked && (
           <div className="border-b bg-amber-50 px-6 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
             <span className="flex items-center gap-2">
               <Link2 className="size-4 shrink-0" aria-hidden />
@@ -147,6 +173,55 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </SidebarInset>
     </SidebarProvider>
+    </VoiceShell>
+  )
+}
+
+/**
+ * Voice for the workspace: the agent's softphone (registered while they're available), the
+ * availability check-ins, live call events, and the incoming-call pop-up.
+ */
+function VoiceShell({ children }: { children: ReactNode }) {
+  const presence = usePresence()
+  usePresenceHeartbeat(presence.data?.status)
+  useVoiceEvents()
+  return (
+    <SoftphoneProvider
+      credentials={presence.data?.softphone ?? null}
+      enabled={presence.data?.status === "available"}
+    >
+      {children}
+      <IncomingCallDialog />
+    </SoftphoneProvider>
+  )
+}
+
+/** The number of live calls, on the rail icon. */
+function LiveCallCount() {
+  const count = useLiveCallCount()
+  if (count === 0) return null
+  return (
+    <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-semibold text-white tabular-nums">
+      {count}
+    </span>
+  )
+}
+
+/** The live calls beside the calls page. */
+function LiveCallsPanel() {
+  const count = useLiveCallCount()
+  return (
+    <>
+      <SidebarHeader className="gap-1 border-b p-4">
+        <span className="text-base font-medium text-foreground">Live calls</span>
+        <span className="text-xs text-muted-foreground">
+          {count === 0 ? "Nobody is on a call." : `${count} ${count === 1 ? "call" : "calls"} in progress`}
+        </span>
+      </SidebarHeader>
+      <SidebarContent className="gap-0">
+        <LiveCallsList />
+      </SidebarContent>
+    </>
   )
 }
 
