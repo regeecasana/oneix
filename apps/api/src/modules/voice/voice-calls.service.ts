@@ -8,11 +8,14 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
+  type FlowCallEventRequest,
+  type FlowCallEventResponse,
   type FlowCallStartRequest,
   type FlowCallStartResponse,
   type FlowHandoverRequest,
   type FlowHandoverResponse,
   LIVE_CALL_STATES,
+  MISSED_CALL_EVENTS,
   type LiveCall,
   type LiveCallsResponse,
   VOICE_SIP_HEADERS,
@@ -137,12 +140,34 @@ export class VoiceCallsService {
       .filter((name): name is string => name !== null)
       .slice(0, MAX_DIAL_TARGETS)
       .map((name) => ({ type: "user" as const, name }));
+    // Nobody to ring: the call is missed now, and the AI agent tells the caller.
+    if (targets.length === 0) await this.flowMissed(token);
     return {
       ticketNumber: call.ticketNumber,
       targets,
       headers: { [VOICE_SIP_HEADERS.call]: call.id, [VOICE_SIP_HEADERS.ticket]: String(call.ticketNumber) },
       timeout: this.config.VOICE_RING_TIMEOUT_SECONDS,
+      say:
+        targets.length > 0
+          ? "Connecting you with a colleague now. They'll have everything you told me."
+          : busyMessage(call.ticketNumber),
     };
+  }
+
+  /**
+   * A Voice Gateway call event, passed on by the Flow as is. oneix decides what it means, so the
+   * Flow needs no branches: the call ended, or the agents' phones rang out (missed, say busy).
+   */
+  async flowEvent(token: string, request: FlowCallEventRequest): Promise<FlowCallEventResponse> {
+    const event = request.event.toUpperCase();
+    if ((MISSED_CALL_EVENTS as readonly string[]).includes(event)) {
+      await this.flowMissed(token);
+      const call = await this.byToken(token);
+      return { action: "busy", say: busyMessage(call.ticketNumber) };
+    }
+    if (event === "CALL_COMPLETED" || event === "CALL_FAILED") await this.flowEnded(token);
+    else await this.byToken(token);
+    return { action: "none", say: null };
   }
 
   /** Nobody answered; the ticket stays open for a callback. */
@@ -266,6 +291,12 @@ export class VoiceCallsService {
     }
     this.widgetCalls.set(address, [...recent, now]);
   }
+}
+
+/** What the AI agent says when no agent can take the call. Reference digits are read one by one. */
+export function busyMessage(ticketNumber: number): string {
+  const digits = String(ticketNumber).split("").join(" ");
+  return `Sorry, all our agents are busy right now. Your reference number is ${digits}. We'll get back to you by email. Thank you for calling.`;
 }
 
 function toLiveCall(row: CallRow): LiveCall {

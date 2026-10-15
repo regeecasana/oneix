@@ -80,11 +80,32 @@ export const FlowHandoverResponse = z.object({
   headers: z.record(z.string(), z.string()),
   /** Seconds to ring before giving up. */
   timeout: z.number().int(),
+  /**
+   * What the AI agent says now: that it's connecting the caller, or, when nobody is available, that
+   * agents are busy (the call is then marked missed; hang up after saying it).
+   */
+  say: z.string(),
 });
 export type FlowHandoverResponse = z.infer<typeof FlowHandoverResponse>;
 
 export const FlowAckResponse = z.object({ ok: z.literal(true) });
 export type FlowAckResponse = z.infer<typeof FlowAckResponse>;
+
+/** A Voice Gateway call event the Flow received, such as `CALL_COMPLETED` or `NO_ANSWER`. */
+export const FlowCallEventRequest = z.looseObject({
+  event: z.string().min(1).max(100),
+});
+export type FlowCallEventRequest = z.infer<typeof FlowCallEventRequest>;
+
+export const FlowCallEventResponse = z.object({
+  /** `busy`: no agent answered; say `say`, then hang up. `none`: nothing to do. */
+  action: z.enum(["busy", "none"]),
+  say: z.string().nullable(),
+});
+export type FlowCallEventResponse = z.infer<typeof FlowCallEventResponse>;
+
+/** Voice Gateway events meaning the agents' phones rang out or refused. */
+export const MISSED_CALL_EVENTS = ["NO_ANSWER", "USER_BUSY", "TRANSFER_DIAL_ERROR", "TRANSFER_REFER_ERROR"] as const;
 
 /** A call as agents see it. */
 export const LiveCall = z.object({

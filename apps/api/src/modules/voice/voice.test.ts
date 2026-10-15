@@ -2,6 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { digestMatches, gatewaySignatureMatches } from "./sip-auth.js";
 import { transcriptLines, transcriptNote } from "./transcript.js";
+import { busyMessage } from "./voice-calls.service.js";
 
 const md5 = (value: string) => createHash("md5").update(value).digest("hex");
 
@@ -77,5 +78,11 @@ describe("gatewaySignatureMatches", () => {
     expect(gatewaySignatureMatches(undefined, body, "whsec", now)).toBe(false);
     expect(gatewaySignatureMatches(sign(t, "other"), body, "whsec", now)).toBe(false);
     expect(gatewaySignatureMatches(sign(t - 3600), body, "whsec", now)).toBe(false);
+  });
+});
+
+describe("busyMessage", () => {
+  it("reads the reference number digit by digit", () => {
+    expect(busyMessage(9800)).toContain("Your reference number is 9 8 0 0.");
   });
 });

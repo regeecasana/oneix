@@ -17,6 +17,8 @@ import {
 import { ApiBearerAuth, ApiExcludeController, ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
   FlowAckResponse,
+  FlowCallEventRequest,
+  FlowCallEventResponse,
   FlowCallStartRequest,
   FlowCallStartResponse,
   FlowHandoverRequest,
@@ -100,6 +102,23 @@ export class FlowController {
     @Body({ schema: FlowHandoverRequest }) body: FlowHandoverRequest,
   ): Promise<FlowHandoverResponse> {
     return this.calls.flowHandover(token, body);
+  }
+
+  @Post("event")
+  @HttpCode(200)
+  @ApiOperation({
+    summary: "A Voice Gateway call event",
+    description:
+      "Pass any call event on as is: `CALL_COMPLETED` ends the call; `NO_ANSWER`, `USER_BUSY`, `TRANSFER_DIAL_ERROR`, " +
+      "and `TRANSFER_REFER_ERROR` mark it missed and return the busy message to say before hanging up. Others are ignored.",
+  })
+  @ApiOkResponse({ standardSchema: FlowCallEventResponse })
+  @ApiErrors(401, 404)
+  event(
+    @Param("token") token: string,
+    @Body({ schema: FlowCallEventRequest }) body: FlowCallEventRequest,
+  ): Promise<FlowCallEventResponse> {
+    return this.calls.flowEvent(token, body);
   }
 
   @Post("missed")
