@@ -157,9 +157,46 @@ Go to **Build > AI Agents** and click **Create AI Agent** (or **+ New AI Agent**
 
 ## 5. The Flow
 
-Go to **Build > Flows**, click **+ New Flow**, name it `Web call`, and build the nodes below in order.
+### 5.0 Build it with the script (recommended)
 
-Every request to oneix uses the **call token**, which arrives as `{{input.userId}}`, so one Flow serves every call.
+`npm run cognigy:flow` builds the AI agent **Adam**, the Flow **OneIX Web Call** with every node, and the **Voice Gateway Endpoint** through Cognigy's REST API.
+
+1. In `.env`, set:
+
+   | Variable | Value |
+   |---|---|
+   | `COGNIGY_API_BASE_URL` | Your Cognigy API URL, for example `https://api-app.cognigy.ai`, or for a NiCE CXone environment `https://cognigy-api-<region>.nicecxone.com` |
+   | `COGNIGY_API_KEY` | Cognigy: **User Menu > My Profile > API Keys > Create New** |
+   | `COGNIGY_PROJECT_ID` | The project's ID: the 24-character part of its address in Cognigy |
+   | `ONEIX_PUBLIC_API_URL` | The tunnel address from part 2 (`<oneix>`) |
+
+   `VOICE_FLOW_SECRET` is already set.
+
+   Optional, for Adam's voice: `COGNIGY_TTS_VOICE` (an ElevenLabs voice ID), `COGNIGY_TTS_LANGUAGE` (default `en-US`), and `COGNIGY_TTS_MODEL` (default `eleven_flash_v2_5`). Without a voice ID, Adam uses the Endpoint's default voice.
+
+2. Run `npm run cognigy:flow`. It creates the AI agent Adam (or updates him if he exists), the Flow, and the Endpoint. To rebuild later (for example when the tunnel address changes), run `npm run cognigy:flow -- --replace`.
+3. Continue with **part 6**. The script creates the Endpoint, but the **Set Up Click To Call Integration** button (6.2) isn't in the API, so that step stays manual.
+
+The Flow it builds:
+
+```
+Start
+└─ Code: oneix settings and call event      sets context.oneix, reads any Voice Gateway call event
+└─ If: Call event?
+   ├─ Then: HTTP Request → oneix /event     oneix decides: call ended, or nobody answered
+   │        Code: say busy and hang up      only when oneix answers "busy"
+   └─ Else: If: First turn?
+            └─ Then: HTTP Request → oneix /start   ticket number and caller's name
+            AI Agent: Adam (job: front-line support and handover)
+            └─ Tool: transfer_to_human (reason)
+               └─ Get Transcript → HTTP Request → oneix /handover → Code: ring agents
+```
+
+oneix makes the decisions (missed or ended, what to say when nobody is free), so the Flow needs no branches for them.
+
+**If the script stops.** It checks every node type and setting against Cognigy's own node descriptors before creating anything. If one doesn't match, it creates nothing, removes the empty Flow, and writes `cognigy-flow-report.json` with the details (no secrets). Send that file over to get the script adjusted. To look at the descriptors yourself: `npm run cognigy:flow -- --inspect`.
+
+**Building it by hand** instead: follow 5.1 and 5.2 below. They describe the same Flow with separate `missed` and `ended` requests, which oneix also accepts.
 
 ### 5.1 Settings for every request to oneix
 

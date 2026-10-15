@@ -19,7 +19,7 @@ Only the AI part of the call is transcribed in this version. Transcribing the ag
 |---|---|
 | Contact center page and call widget | `apps/landing` (port 3002) |
 | Website call API: ticket and token | `POST /widget/calls` |
-| Flow API: start, handover, missed, ended | `POST /voice/flow/calls/{token}/…` |
+| Flow API: start, handover, event (or missed and ended) | `POST /voice/flow/calls/{token}/…` |
 | Softphone registration webhook for Voice Gateway | `POST /voice/sip/register` |
 | Agent API: live calls, answer, end, availability, live events | `/voice/calls`, `/voice/presence`, `/voice/events` |
 | Agent softphone (JsSIP), pop-up, live calls, banner | `apps/web/features/voice` |
@@ -116,7 +116,13 @@ api.output(null, {
 }
 ```
 
-`missed` and `ended`: `{ "ok": true }`.
+`handover` also returns `say`: what Adam says now. When nobody is available, `targets` is empty, the call is marked missed, and `say` is the busy message with the ticket number read digit by digit.
+
+`event`: pass any Voice Gateway call event as `{ "event": "NO_ANSWER" }`. `CALL_COMPLETED` ends the call; `NO_ANSWER`, `USER_BUSY`, `TRANSFER_DIAL_ERROR`, and `TRANSFER_REFER_ERROR` mark it missed and return `{ "action": "busy", "say": "…" }`; anything else returns `{ "action": "none", "say": null }`.
+
+`missed` and `ended` (for a hand-built Flow): `{ "ok": true }`.
+
+The Flow can be built with `npm run cognigy:flow`; see [11-voice-setup-guide.md](11-voice-setup-guide.md), part 5.
 
 Errors: `401` without the right bearer token, `404` for an unknown call token, `503` if `VOICE_FLOW_SECRET` isn't set.
 
@@ -140,7 +146,7 @@ Without Cognigy, `npm run voice:simulate` plays the Flow's part of a call (start
 These come from documentation that doesn't spell them out, so check them on the first call:
 
 1. **The call token reaches the Flow as `input.userId`.** The SDK makes it the caller's SIP user. If it arrives elsewhere, adjust the HTTP Request URLs.
-2. **The registration webhook's request.** oneix follows jambonz's format (Voice Gateway runs on jambonz): a SIP digest in the body, a `Jambonz-Signature` header from the Webhook Secret, and `{ "status": "ok" }` in reply. The API logs every refused registration.
+2. **The registration webhook's request.** oneix follows jambonz's format (Voice Gateway runs on jambonz): a SIP digest in the body, a `VG-Signature` header from the Webhook Secret (jambonz's signing scheme), and `{ "status": "ok" }` in reply. The API logs every refused registration.
 3. **The Get Transcript output.** oneix reads common shapes. If the note on the ticket comes out empty, send the raw output and adjust `transcript.ts`.
 4. **Dial outcome events** for node 1's Lookup.
 
