@@ -165,6 +165,7 @@ export interface CreateTicketInput {
   subject: string;
   /** First internal comment on the ticket. */
   description: string;
+  tags?: string[];
 }
 
 export interface NewComment {

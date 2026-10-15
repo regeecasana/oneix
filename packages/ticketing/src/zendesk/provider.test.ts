@@ -565,3 +565,57 @@ describe("ZendeskProvider", () => {
     expect(ticketCalls).toBe(2);
   });
 });
+
+describe("ZendeskProvider customers", () => {
+  it("reuses an existing customer by email without changing their name", async () => {
+    const { zendesk, calls } = provider({
+      "GET /api/v2/users/search.json": () => json({ users: [{ ...customer, email: "Casey@Example.com" }] }),
+    });
+
+    const found = await zendesk.findOrCreateCustomer({ name: "Someone Else", email: "casey@example.com" });
+
+    expect(found.name).toBe("Casey Customer");
+    expect(calls.find((c) => c.url.pathname.endsWith("search.json"))?.url.searchParams.get("query")).toBe(
+      "email:casey@example.com",
+    );
+    expect(calls.some((c) => c.method === "POST" && c.url.pathname.startsWith("/api/"))).toBe(false);
+  });
+
+  it("creates the customer when nobody has the email", async () => {
+    const { zendesk, calls } = provider({
+      "GET /api/v2/users/search.json": () => json({ users: [] }),
+      "POST /api/v2/users/create_or_update.json": () => json({ user: { ...customer, id: 11, name: "New Person" } }),
+    });
+
+    const created = await zendesk.findOrCreateCustomer({ name: "New Person", email: "new@example.com" });
+
+    expect(created).toMatchObject({ externalId: "11", name: "New Person" });
+    expect(calls.find((c) => c.url.pathname === "/api/v2/users/create_or_update.json")?.body).toMatchObject({
+      user: { name: "New Person", email: "new@example.com", role: "end-user" },
+    });
+  });
+});
+
+describe("ZendeskProvider tickets", () => {
+  it("credits a system-created ticket's first note to the API's own user, with tags", async () => {
+    const { zendesk, calls } = provider({
+      "GET /api/v2/users/me.json": () => json({ user: { ...agent, id: 77 } }),
+      "POST /api/v2/tickets.json": () => json({ ticket: { ...ticket, id: 1002 } }),
+    });
+
+    await zendesk.createTicket({ requesterExternalId: "10", subject: "Call", description: "Started", tags: ["web_call"] });
+    await zendesk.createTicket({ requesterExternalId: "10", subject: "Call", description: "Started" });
+
+    const posts = calls.filter((c) => c.url.pathname === "/api/v2/tickets.json");
+    expect(posts[0]?.body).toEqual({
+      ticket: {
+        subject: "Call",
+        requester_id: 10,
+        comment: { body: "Started", public: false, author_id: 77 },
+        tags: ["web_call"],
+      },
+    });
+    // The API user is looked up once.
+    expect(calls.filter((c) => c.url.pathname === "/api/v2/users/me.json")).toHaveLength(1);
+  });
+});

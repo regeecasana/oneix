@@ -56,6 +56,8 @@ const SHOW_MANY_LIMIT = 100;
 
 export class ZendeskProvider implements TicketingProvider {
   private readonly client: ZendeskClient;
+  /** The API's own Zendesk user, looked up once. */
+  private apiUserId: Promise<number> | null = null;
 
   constructor(config: ZendeskConfig) {
     this.client = new ZendeskClient(config);
@@ -218,7 +220,18 @@ export class ZendeskProvider implements TicketingProvider {
       throw new Error("A customer needs an email or a phone number");
     }
 
-    // create_or_update matches on email. Phone-only customers are searched first to avoid duplicates.
+    // An existing user is reused as is: create_or_update would overwrite their name with whatever
+    // was typed, for example on a public call form.
+    if (identity.email) {
+      const found = await this.client.request<UsersResponse>("GET", "/api/v2/users/search.json", {
+        query: { query: `email:${identity.email}` },
+      });
+      const email = identity.email.toLowerCase();
+      const match = found.users.find((user) => user.email?.toLowerCase() === email);
+      if (match) return toCustomer(match);
+    }
+
+    // Phone-only customers are searched first to avoid duplicates.
     if (!identity.email && identity.phone) {
       const found = await this.client.request<UsersResponse>("GET", "/api/v2/users/search.json", {
         query: { query: identity.phone },
@@ -241,13 +254,17 @@ export class ZendeskProvider implements TicketingProvider {
   }
 
   async createTicket(input: CreateTicketInput, actor?: Actor): Promise<ExternalTicket> {
+    // Zendesk credits the first comment to the requester unless told otherwise; an internal note
+    // written by the system shouldn't look like the customer wrote it.
+    const author = actor ? this.authorFor(actor) : { author_id: await this.ownUserId() };
     const { ticket } = await this.client.request<TicketResponse>("POST", "/api/v2/tickets.json", {
       onBehalfOf: actor?.email,
       body: {
         ticket: {
           subject: input.subject,
           requester_id: Number(input.requesterExternalId),
-          comment: { body: input.description, public: false, ...this.authorFor(actor) },
+          comment: { body: input.description, public: false, ...author },
+          ...(input.tags ? { tags: input.tags } : {}),
         },
       },
     });
@@ -346,6 +363,17 @@ export class ZendeskProvider implements TicketingProvider {
     await this.client.request("PUT", `/api/v2/tickets/${id(externalId)}.json`, {
       body: { ticket: { comment: { body, public: false } } },
     });
+  }
+
+  private ownUserId(): Promise<number> {
+    this.apiUserId ??= this.client
+      .request<UserResponse>("GET", "/api/v2/users/me.json")
+      .then(({ user }) => user.id)
+      .catch((error: unknown) => {
+        this.apiUserId = null;
+        throw error;
+      });
+    return this.apiUserId;
   }
 
   /** Without impersonation, the comment author is set explicitly so history shows the agent. */
