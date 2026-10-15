@@ -8,6 +8,7 @@ export const TENANT_MODELS = new Set([
   "Ticket",
   "TicketForm",
   "TicketField",
+  "VoiceCall",
   "WebhookEvent",
   "AuditLog",
   "BackendAgent",

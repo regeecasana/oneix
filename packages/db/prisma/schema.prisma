@@ -88,6 +88,16 @@ enum TicketAccess {
   requested
 }
 
+/// VoiceCallState from @oneix/contracts.
+enum VoiceCallState {
+  connecting
+  ai
+  queued
+  agent
+  missed
+  ended
+}
+
 enum WebhookEventStatus {
   pending
   processed
@@ -111,6 +121,7 @@ model Tenant {
   customers     Customer[]
   tickets       Ticket[]
   ticketForms   TicketForm[]
+  voiceCalls    VoiceCall[]
   ticketFields  TicketField[]
   webhookEvents WebhookEvent[]
   auditLogs     AuditLog[]
@@ -160,6 +171,7 @@ model User {
 
   memberships     TenantMembership[]
   assignedTickets Ticket[]
+  answeredCalls   VoiceCall[]
   auditLogs       AuditLog[]
   sessions        Session[]
   authTokens      AuthToken[]        @relation("AuthTokenUser")
@@ -413,4 +425,34 @@ model AuditLog {
   actor  User?  @relation(fields: [actorId], references: [id])
 
   @@index([tenantId, targetType, targetId])
+}
+
+/// A voice call from a client's website, answered by the Cognigy AI agent and handed over to oneix agents.
+model VoiceCall {
+  id               String         @id @default(cuid())
+  tenantId         String
+  /// Identifies the call to Cognigy: the caller's SIP user, which the Flow reads as input.userId. SIP-safe.
+  token            String         @unique
+  ticketExternalId String
+  ticketNumber     Int
+  customerName     String
+  customerEmail    String
+  state            VoiceCallState @default(connecting)
+  cognigySessionId String?
+  /// Voice Gateway's call ID, for support.
+  gatewayCallId    String?
+  /// The agent who answered.
+  agentId          String?
+  startedAt        DateTime?
+  handedOverAt     DateTime?
+  answeredAt       DateTime?
+  endedAt          DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  agent  User?  @relation(fields: [agentId], references: [id])
+
+  @@index([tenantId, state])
+  @@index([tenantId, ticketNumber])
 }
