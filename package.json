@@ -21,7 +21,8 @@
     "db:generate": "npm run generate -w @oneix/db",
     "db:migrate": "npm run migrate -w @oneix/db",
     "tenant": "node --env-file-if-exists=.env apps/worker/dist/cli/tenant.js",
-    "voice:simulate": "node --env-file-if-exists=.env scripts/simulate-call.mjs"
+    "voice:simulate": "node --env-file-if-exists=.env scripts/simulate-call.mjs",
+    "cognigy:flow": "node --env-file-if-exists=.env scripts/cognigy/build-web-call-flow.mjs"
   },
   "prettier": "@oneix/config/prettier",
   "devDependencies": {

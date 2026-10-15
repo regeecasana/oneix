@@ -11,3 +11,6 @@ next-env.d.ts
 !.env.example
 
 packages/db/src/generated/
+
+# Written by npm run cognigy:flow when it can't build the Flow.
+cognigy-flow-report.json
