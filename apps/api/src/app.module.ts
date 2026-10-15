@@ -13,10 +13,11 @@ import { TeamController } from "./modules/team/team.controller.js";
 import { TeamService } from "./modules/team/team.service.js";
 import { TicketsModule } from "./modules/tickets/tickets.module.js";
 import { UsersController } from "./modules/users/users.controller.js";
+import { VoiceModule } from "./modules/voice/voice.module.js";
 import { WebhooksModule } from "./modules/webhooks/webhooks.module.js";
 
 @Module({
-  imports: [ProvidersModule, AuditModule, TicketsModule, WebhooksModule],
+  imports: [ProvidersModule, AuditModule, TicketsModule, VoiceModule, WebhooksModule],
   controllers: [AuthController, TeamController, UsersController, HealthController],
   providers: [
     SessionStore,

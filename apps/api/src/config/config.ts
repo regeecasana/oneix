@@ -13,6 +13,22 @@ const schema = z
 
     /** Encrypts tenant credentials at rest. 32 bytes, base64. */
     ONEIX_ENCRYPTION_KEY: z.string().min(1),
+
+    /** Websites allowed to start calls with POST /widget/calls, comma-separated. */
+    WIDGET_ORIGINS: z
+      .string()
+      .default("http://localhost:3002")
+      .transform((value) => value.split(",").map((origin) => origin.trim().replace(/\/$/, "")).filter(Boolean)),
+    /** Bearer token the Cognigy Flow sends to /voice/flow. Voice calls are off without it. */
+    VOICE_FLOW_SECRET: z.string().min(24).optional(),
+    /** Voice Gateway's Webhook Secret, to check that registration requests come from it. */
+    VOICE_GATEWAY_WEBHOOK_SECRET: z.string().min(1).optional(),
+    /** The SIP realm (domain) agents' softphones register in on Voice Gateway. */
+    VOICE_SIP_REALM: z.string().min(1).optional(),
+    /** Voice Gateway's secure WebSocket for softphones, for example wss://<gateway>:8443. */
+    VOICE_GATEWAY_WSS_URL: z.url().optional(),
+    /** How long agents' softphones ring on a handover before the AI tells the caller nobody is free. */
+    VOICE_RING_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(120).default(30),
   })
   .refine((c) => !(c.NODE_ENV === "production" && c.AUTH_DEV_LOGIN), {
     message: "AUTH_DEV_LOGIN must be off in production",

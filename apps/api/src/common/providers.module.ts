@@ -3,12 +3,15 @@ import { QUEUES, redisConnectionFromUrl } from "@oneix/contracts";
 import { createPrismaClient, type PrismaClient } from "@oneix/db";
 import { SecretBox, TicketingRegistry } from "@oneix/tenancy";
 import { Queue } from "bullmq";
+import { Redis } from "ioredis";
 import { APP_CONFIG, type AppConfig, loadConfig } from "../config/config.js";
 
 export const PRISMA = Symbol("PRISMA");
 /** TicketingRegistry: the ticketing client for any tenant. */
 export const TICKETING = Symbol("TICKETING");
 export const WEBHOOK_QUEUE = Symbol("WEBHOOK_QUEUE");
+/** Redis, for short-lived state such as agent presence, and for live events. */
+export const REDIS = Symbol("REDIS");
 
 /** Config, database, per-tenant ticketing clients, and queues, available to every module. */
 @Global()
@@ -32,16 +35,23 @@ export const WEBHOOK_QUEUE = Symbol("WEBHOOK_QUEUE");
       useFactory: (config: AppConfig) =>
         new Queue(QUEUES.webhooks, { connection: redisConnectionFromUrl(config.REDIS_URL) }),
     },
+    {
+      provide: REDIS,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig) => new Redis(redisConnectionFromUrl(config.REDIS_URL)),
+    },
   ],
-  exports: [APP_CONFIG, PRISMA, TICKETING, WEBHOOK_QUEUE],
+  exports: [APP_CONFIG, PRISMA, TICKETING, WEBHOOK_QUEUE, REDIS],
 })
 export class ProvidersModule implements OnApplicationShutdown {
   constructor(
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     @Inject(WEBHOOK_QUEUE) private readonly webhookQueue: Queue,
+    @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
   async onApplicationShutdown(): Promise<void> {
+    this.redis.disconnect();
     await Promise.allSettled([this.webhookQueue.close(), this.prisma.$disconnect()]);
   }
 }
