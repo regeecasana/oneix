@@ -34,6 +34,9 @@ This README sits at the repo root. The numbered files go in `docs/`.
 | [06-data-model.md](docs/06-data-model.md) | Entities and enums |
 | [07-mvp-roadmap.md](docs/07-mvp-roadmap.md) | Milestones, open items, what is deferred |
 | [08-zendesk-workspace.md](docs/08-zendesk-workspace.md) | Replacing the Zendesk Agent Workspace: feature map, tenancy, phases |
+| [11-voice-setup-guide.md](docs/11-voice-setup-guide.md) | Step-by-step setup: Cognigy, Voice Gateway, and oneix for website calls |
+| [10-voice-mvp.md](docs/10-voice-mvp.md) | Website calls with AI handover: setup, the Cognigy Flow, testing |
+| [09-voice-architecture.md](docs/09-voice-architecture.md) | Voice AI on Cognigy, handover to CXone, live transcription, translation, PII, voice authentication |
 
 ## Local development (planned)
 

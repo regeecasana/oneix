@@ -35,6 +35,7 @@ oneix is a B2B product: each client is a **tenant** with its own Zendesk instanc
 |---|---|---|
 | `apps/web` | http://localhost:3000 | Agent workspace: sign-in, client switcher, inbox, ticket view with replies, notes, and the ticket form, Team page |
 | `apps/api` | http://localhost:4000 | REST API, per-tenant Zendesk webhooks. Health check at `/health`. API docs at [/docs](http://localhost:4000/docs) |
+| `apps/landing` | http://localhost:3002 | Demo contact center page with the website call widget (Cognigy Click To Call) |
 | `apps/worker` | — | Processes webhooks, keeps each tenant's ticket cache, agents, and ticket forms in sync with its Zendesk. Also hosts the tenant CLI |
 
 How tenants work:
@@ -302,6 +303,9 @@ Zendesk credentials are never given to the web app.
 | [docs/06-data-model.md](docs/06-data-model.md) | Entities and enums |
 | [docs/07-mvp-roadmap.md](docs/07-mvp-roadmap.md) | Milestones, open items, what is deferred |
 | [docs/08-zendesk-workspace.md](docs/08-zendesk-workspace.md) | Replacing the Zendesk Agent Workspace: feature map, tenancy, phases |
+| [docs/11-voice-setup-guide.md](docs/11-voice-setup-guide.md) | Step-by-step setup: Cognigy, Voice Gateway, and oneix for website calls |
+| [docs/10-voice-mvp.md](docs/10-voice-mvp.md) | Website calls with AI handover: setup, the Cognigy Flow, testing |
+| [docs/09-voice-architecture.md](docs/09-voice-architecture.md) | Voice AI on Cognigy, handover to CXone, live transcription, translation, PII, voice authentication |
 
 ### How it will behave at MVP
 
