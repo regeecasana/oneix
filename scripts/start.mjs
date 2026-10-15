@@ -8,7 +8,7 @@
  * 3. Installs dependencies if needed.
  * 4. Applies database migrations and builds the apps.
  * 5. Connects the development tenant from ZENDESK_* values, unless it is already connected.
- * 6. Runs api, worker, and web in watch mode.
+ * 6. Runs api, worker, web, and the landing page in watch mode.
  *
  * Every step is safe to repeat, so the same command works on every run.
  */
@@ -97,8 +97,9 @@ if (!run("npm run tenant --silent -- bootstrap")) {
 }
 
 // 6. Apps
-step("Starting api, worker, and web (Ctrl+C to stop)");
+step("Starting api, worker, web, and landing (Ctrl+C to stop)");
 console.log("  Workspace: http://localhost:3000");
+console.log("  Landing:   http://localhost:3002 (website call widget)");
 console.log("  API:       http://localhost:4000\n");
 const dev = spawnSync("npx turbo run dev", { cwd: root, shell: true, stdio: "inherit" });
 process.exit(dev.status ?? 0);
