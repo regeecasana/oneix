@@ -33,8 +33,8 @@ export function digestMatches(challenge: DigestChallengeResponse, password: stri
 const SIGNATURE_TOLERANCE_SECONDS = 300;
 
 /**
- * Checks a webhook signature from Voice Gateway's Webhook Secret, in jambonz's format:
- * `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">`.
+ * Checks a webhook signature from Voice Gateway's Webhook Secret, in jambonz's format, sent in the
+ * `VG-Signature` header: `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">`.
  */
 export function gatewaySignatureMatches(
   header: string | undefined,
@@ -55,6 +55,50 @@ export function gatewaySignatureMatches(
   if (Math.abs(now / 1000 - timestamp) > SIGNATURE_TOLERANCE_SECONDS) return false;
   const expected = createHmac("sha256", secret).update(`${timestamp}.${rawBody.toString()}`).digest("hex");
   return safeEqual(expected, signature);
+}
+
+/**
+ * What a refused signature looked like, for the log: which headers came, the signature's shape, the
+ * clock difference, and which way of signing would have matched. No secrets or credentials.
+ */
+export function describeGatewaySignature(
+  headers: Record<string, string | string[] | undefined>,
+  rawBody: Buffer | string | undefined,
+  parsedBody: unknown,
+  secret: string,
+  now = Date.now(),
+): Record<string, unknown> {
+  const signatureHeaders = Object.keys(headers).filter((name) => /sign|hmac|jambonz/i.test(name));
+  const value = String(headers["vg-signature"] ?? headers["jambonz-signature"] ?? headers[signatureHeaders[0] ?? ""] ?? "");
+  const fields = new Map(
+    value.split(",").map((part) => {
+      const [key, ...rest] = part.trim().split("=");
+      return [key ?? "", rest.join("=")] as const;
+    }),
+  );
+  const timestamp = fields.get("t") ?? "";
+  const signature = fields.get("v1") ?? value;
+  const raw = rawBody === undefined ? undefined : rawBody.toString();
+  const json = JSON.stringify(parsedBody ?? {});
+  const hmac = (key: string, payload: string) => createHmac("sha256", key).update(payload).digest("hex");
+  const candidates: Record<string, string | undefined> = {
+    "t.rawBody": raw === undefined ? undefined : hmac(secret, `${timestamp}.${raw}`),
+    "t.jsonBody": hmac(secret, `${timestamp}.${json}`),
+    rawBody: raw === undefined ? undefined : hmac(secret, raw),
+    jsonBody: hmac(secret, json),
+  };
+  return {
+    headerNames: Object.keys(headers),
+    signatureHeaders,
+    signatureFields: [...fields.keys()],
+    signatureLength: signature.length,
+    clockDifferenceSeconds: timestamp ? Math.round(now / 1000 - Number(timestamp)) : null,
+    contentType: headers["content-type"],
+    rawBodyLength: raw?.length ?? null,
+    matches: Object.entries(candidates)
+      .filter(([, expected]) => expected !== undefined && expected === signature.toLowerCase())
+      .map(([name]) => name),
+  };
 }
 
 function md5(value: string): string {

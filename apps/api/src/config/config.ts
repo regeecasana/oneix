@@ -21,6 +21,16 @@ const schema = z
       .transform((value) => value.split(",").map((origin) => origin.trim().replace(/\/$/, "")).filter(Boolean)),
     /** Bearer token the Cognigy Flow sends to /voice/flow. Voice calls are off without it. */
     VOICE_FLOW_SECRET: z.string().min(24).optional(),
+    /**
+     * Click To Call Endpoint URLs whose widget logins oneix accepts, comma-separated. With the
+     * registration webhook pointing at oneix, Voice Gateway asks oneix about customers' widget calls
+     * too. Defaults to the landing page's NEXT_PUBLIC_COGNIGY_C2C_ENDPOINT_URL.
+     */
+    VOICE_C2C_ENDPOINT_URLS: z
+      .string()
+      .optional()
+      .transform((value) => (value ?? "").split(",").map((url) => url.trim()).filter(Boolean)),
+    NEXT_PUBLIC_COGNIGY_C2C_ENDPOINT_URL: z.string().optional(),
     /** Voice Gateway's Webhook Secret, to check that registration requests come from it. */
     VOICE_GATEWAY_WEBHOOK_SECRET: z.string().min(1).optional(),
     /** The SIP realm (domain) agents' softphones register in on Voice Gateway. */
@@ -47,5 +57,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     console.error(`Invalid api configuration:\n${z.prettifyError(result.error)}`);
     process.exit(1);
   }
-  return result.data;
+  const config = result.data;
+  if (config.VOICE_C2C_ENDPOINT_URLS.length === 0 && config.NEXT_PUBLIC_COGNIGY_C2C_ENDPOINT_URL) {
+    config.VOICE_C2C_ENDPOINT_URLS = [config.NEXT_PUBLIC_COGNIGY_C2C_ENDPOINT_URL];
+  }
+  return config;
 }

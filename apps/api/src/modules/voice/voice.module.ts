@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AuditModule } from "../audit/audit.module.js";
+import { ClickToCallCredentials } from "./click-to-call-credentials.js";
 import { FlowSecretGuard } from "./flow-secret.guard.js";
 import { PresenceService } from "./presence.service.js";
 import { VoiceCallsService } from "./voice-calls.service.js";
@@ -10,6 +11,6 @@ import { VoiceEventsService } from "./voice-events.service.js";
 @Module({
   imports: [AuditModule],
   controllers: [WidgetController, FlowController, SipRegistrationController, VoiceController],
-  providers: [VoiceCallsService, PresenceService, VoiceEventsService, FlowSecretGuard],
+  providers: [VoiceCallsService, PresenceService, VoiceEventsService, FlowSecretGuard, ClickToCallCredentials],
 })
 export class VoiceModule {}

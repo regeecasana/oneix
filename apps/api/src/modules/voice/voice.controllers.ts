@@ -35,9 +35,15 @@ import type { Observable } from "rxjs";
 import { ApiErrors, ApiSession } from "../../common/api-docs.js";
 import { CurrentUser, Public, type SessionUser } from "../../common/auth.js";
 import { APP_CONFIG, type AppConfig } from "../../config/config.js";
+import { ClickToCallCredentials } from "./click-to-call-credentials.js";
 import { FlowSecretGuard } from "./flow-secret.guard.js";
 import { PresenceService } from "./presence.service.js";
-import { type DigestChallengeResponse, digestMatches, gatewaySignatureMatches } from "./sip-auth.js";
+import {
+  type DigestChallengeResponse,
+  describeGatewaySignature,
+  digestMatches,
+  gatewaySignatureMatches,
+} from "./sip-auth.js";
 import { VoiceCallsService } from "./voice-calls.service.js";
 import { VoiceEventsService } from "./voice-events.service.js";
 
@@ -154,6 +160,7 @@ export class SipRegistrationController {
 
   constructor(
     private readonly presence: PresenceService,
+    private readonly widgets: ClickToCallCredentials,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -161,17 +168,41 @@ export class SipRegistrationController {
   @HttpCode(200)
   async register(@Req() request: RawBodyRequest<Request>): Promise<{ status: "ok" | "fail"; msg?: string; expires?: number }> {
     const secret = this.config.VOICE_GATEWAY_WEBHOOK_SECRET;
-    if (secret && !gatewaySignatureMatches(request.get("jambonz-signature"), request.rawBody ?? "", secret)) {
-      this.logger.warn("softphone registration refused: bad signature");
+    // Cognigy's Voice Gateway sends jambonz's signature under its own header name.
+    const signature = request.get("vg-signature") ?? request.get("jambonz-signature");
+    if (secret && !gatewaySignatureMatches(signature, request.rawBody ?? "", secret)) {
+      this.logger.warn(
+        `softphone registration refused: bad signature ${JSON.stringify(
+          describeGatewaySignature(request.headers, request.rawBody, request.body, secret),
+        )}`,
+      );
       return { status: "fail", msg: "Invalid signature" };
     }
 
     const body = (request.body ?? {}) as Partial<DigestChallengeResponse> & { expires?: number };
     const username = (body.username ?? "").split("@")[0] ?? "";
+    // An agent's softphone, or else a customer's Click To Call widget call.
     const owner = username ? await this.presence.owner(username) : null;
+    const password = owner?.password ?? (username ? await this.widgets.passwordOf(username) : null);
     const complete = body.realm && body.nonce && body.uri && body.response;
-    if (!owner || !complete || !digestMatches({ ...(body as DigestChallengeResponse), username: body.username! }, owner.password)) {
-      this.logger.warn({ username }, "softphone registration refused");
+    if (!password || !complete || !digestMatches({ ...(body as DigestChallengeResponse), username: body.username! }, password)) {
+      this.logger.warn(
+        `softphone registration refused ${JSON.stringify({
+          reason: !password
+            ? "unknown login: not an agent's softphone (or its credentials expired) nor a Click To Call widget"
+            : !complete
+              ? "incomplete digest"
+              : "wrong password",
+          username: body.username,
+          realm: body.realm,
+          method: body.method,
+          uri: body.uri,
+          algorithm: body.algorithm,
+          qop: body.qop,
+          // Field names only: the shape of what Voice Gateway sent, without values.
+          fields: shapeOf(request.body),
+        })}`,
+      );
       return { status: "fail", msg: "Invalid credentials" };
     }
     return { status: "ok", expires: Math.min(Number(body.expires) || 3600, 3600) };
@@ -241,4 +272,12 @@ export class VoiceController {
   stream(@CurrentUser() user: SessionUser): Observable<MessageEvent> {
     return this.events.stream(user.tenantId);
   }
+}
+
+/** The field names of a request body, nested, without values. */
+function shapeOf(value: unknown, depth = 0): unknown {
+  if (Array.isArray(value)) return depth > 2 ? "[…]" : value.slice(0, 1).map((v) => shapeOf(v, depth + 1));
+  if (typeof value !== "object" || value === null) return typeof value;
+  if (depth > 2) return "{…}";
+  return Object.fromEntries(Object.entries(value).map(([key, v]) => [key, shapeOf(v, depth + 1)]));
 }
