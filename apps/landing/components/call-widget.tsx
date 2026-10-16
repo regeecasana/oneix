@@ -1,11 +1,12 @@
 "use client"
 
 import type { IWebRTCClient } from "@cognigy/click-to-call-sdk"
-import type { WidgetCallResponse } from "@oneix/contracts"
+import type { CallSignal, IceServer, WidgetCallEvent, WidgetCallResponse } from "@oneix/contracts"
 import { ArrowRight, Loader2, Mic, MicOff, Phone, PhoneOff, ShieldCheck, X } from "lucide-react"
 import { type FormEvent, useEffect, useRef, useState } from "react"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"
+
 const ENDPOINT_URL = process.env.NEXT_PUBLIC_COGNIGY_C2C_ENDPOINT_URL ?? ""
 const TENANT = process.env.NEXT_PUBLIC_LANDING_TENANT ?? ""
 
@@ -37,11 +38,25 @@ export function CallWidget({ open, onOpenChange }: { open: boolean; onOpenChange
   const [captions, setCaptions] = useState<Caption[]>([])
   const clientRef = useRef<IWebRTCClient | null>(null)
   const captionId = useRef(0)
+  // The call in progress, to tell oneix when it ends; cleared once told.
+  const callTokenRef = useRef<string | null>(null)
+  // After a handover: the agent the caller is talking with, directly, outside Voice Gateway.
+  const [agentName, setAgentName] = useState<string | null>(null)
+  const direct = useRef<DirectCall | null>(null)
+  const eventsRef = useRef<EventSource | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  // Set while the widget hangs up on Voice Gateway itself, to switch over to the agent.
+  const switchingRef = useRef(false)
   const inCall = phase.name === "connecting" || phase.name === "live"
 
   // Hang up if the page goes away mid-call.
   useEffect(() => {
-    const leave = () => void clientRef.current?.destroy().catch(() => undefined)
+    const leave = () => {
+      reportEnded(callTokenRef)
+      void clientRef.current?.destroy().catch(() => undefined)
+      closeDirect(direct)
+      eventsRef.current?.close()
+    }
     window.addEventListener("beforeunload", leave)
     return () => {
       window.removeEventListener("beforeunload", leave)
@@ -72,23 +87,33 @@ export function CallWidget({ open, onOpenChange }: { open: boolean; onOpenChange
         throw new Error(body.message ?? "We couldn't start the call.")
       }
       const { callToken, ticketNumber } = (await response.json()) as WidgetCallResponse
+      callTokenRef.current = callToken
       setPhase({ name: "connecting", ticketNumber })
+      listen(callToken, ticketNumber)
 
       const { createWebRTCClient, checkWebRTCSupport } = await import("@cognigy/click-to-call-sdk")
       const support = checkWebRTCSupport()
-      if (!support.supported) throw new Error("This browser can't make calls. Try a current Chrome, Edge, Firefox, or Safari.")
+      if (!support.supported)
+        throw new Error("This browser can't make calls. Try a current Chrome, Edge, Firefox, or Safari.")
 
       const client = await createWebRTCClient({ endpointUrl: ENDPOINT_URL, userId: callToken })
       clientRef.current = client
       client.on("answered", () => setPhase({ name: "live", ticketNumber, since: Date.now() }))
-      client.on("ended", (_session, info) => finish(ticketNumber, info.originator === "local" ? null : "The call ended."))
-      client.on("failed", (_session, info) => finish(ticketNumber, info.cause ? `The call couldn't connect (${info.cause}).` : "The call couldn't connect."))
+      client.on("ended", (_session, info) => {
+        // Hanging up on Voice Gateway to talk with the agent directly isn't the end of the call.
+        if (switchingRef.current) return
+        finish(ticketNumber, info.originator === "local" ? null : "The call ended.")
+      })
+      client.on("failed", (_session, info) =>
+        finish(ticketNumber, info.cause ? `The call couldn't connect (${info.cause}).` : "The call couldn't connect."),
+      )
       client.on("muted", () => setMuted(true))
       client.on("unmuted", () => setMuted(false))
-      client.on("transcription", (data: { originator?: string; messages?: { text?: string }[] }) => {
-        const text = (data.messages ?? []).map((m) => m.text ?? "").join(" ").trim()
+      client.on("transcription", (data: TranscriptionEvent) => {
+        if (process.env.NODE_ENV !== "production") console.debug("[call] transcription", data)
+        const text = transcriptionText(data)
         if (!text) return
-        const who = data.originator === "local" ? "You" : "Assistant"
+        const who = transcriptionSpeaker(data)
         setCaptions((current) => [...current.slice(-5), { id: ++captionId.current, who, text }])
       })
       client.on("error", (err) => setError(err.message))
@@ -101,15 +126,100 @@ export function CallWidget({ open, onOpenChange }: { open: boolean; onOpenChange
             ? err.message
             : "We couldn't start the call."
       setError(message)
+      reportEnded(callTokenRef)
       setPhase({ name: "form" })
       void clientRef.current?.destroy().catch(() => undefined)
       clientRef.current = null
     }
   }
 
+  /**
+   * The call's events from oneix. After a handover, the agent who answers sends an offer; the widget
+   * answers it, and once the direct call is up, hangs up on Voice Gateway.
+   */
+  function listen(callToken: string, ticketNumber: number) {
+    eventsRef.current?.close()
+    const events = new EventSource(`${API_URL}/widget/calls/${encodeURIComponent(callToken)}/events`)
+    eventsRef.current = events
+    let iceServers: IceServer[] = []
+    const send = (signal: CallSignal) =>
+      fetch(`${API_URL}/widget/calls/${encodeURIComponent(callToken)}/signal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(signal),
+      }).catch(() => undefined)
+
+    events.onmessage = (message) => {
+      let event: WidgetCallEvent
+      try {
+        event = JSON.parse(message.data as string) as WidgetCallEvent
+      } catch {
+        return
+      }
+      if (event.type === "agent.answered") {
+        iceServers = event.iceServers
+        setAgentName(event.agentName)
+      } else if (event.type === "signal") {
+        void onSignal(event.signal)
+      } else if (event.type === "call.ended") {
+        finish(ticketNumber, "The agent ended the call.")
+      } else if (event.type === "call.missed") {
+        finish(ticketNumber, event.message)
+      }
+    }
+
+    async function onSignal(signal: CallSignal) {
+      try {
+        if (signal.type === "offer") {
+          const call = await openDirect(iceServers, send, () => switchOver(ticketNumber))
+          direct.current = call
+          await call.connection.setRemoteDescription({ type: "offer", sdp: signal.sdp })
+          for (const candidate of call.pending.splice(0)) await call.connection.addIceCandidate(candidate)
+          const answer = await call.connection.createAnswer()
+          await call.connection.setLocalDescription(answer)
+          await send({ type: "answer", sdp: answer.sdp ?? "" })
+        } else if (signal.type === "candidate" && signal.candidate) {
+          const call = direct.current
+          if (call?.connection.remoteDescription) await call.connection.addIceCandidate(signal.candidate)
+          else if (call) call.pending.push(signal.candidate)
+        }
+      } catch (err) {
+        console.warn("[call] couldn't connect to the agent", err)
+        setError("We couldn't connect you to our colleague.")
+      }
+    }
+  }
+
+  /** The direct call with the agent is up: play the agent, and hang up on Voice Gateway. */
+  function switchOver(ticketNumber: number) {
+    const call = direct.current
+    const audio = audioRef.current
+    if (call && audio) {
+      audio.srcObject = call.remote
+      void audio.play().catch(() => undefined)
+    }
+    switchingRef.current = true
+    const client = clientRef.current
+    clientRef.current = null
+    if (client) {
+      void client
+        .endCall()
+        .catch(() => undefined)
+        .finally(() => void client.destroy().catch(() => undefined))
+    }
+    setCaptions([])
+    setMuted(false)
+    setPhase({ name: "live", ticketNumber, since: Date.now() })
+  }
+
   function finish(ticketNumber: number | null, reason: string | null) {
+    reportEnded(callTokenRef)
     void clientRef.current?.destroy().catch(() => undefined)
     clientRef.current = null
+    closeDirect(direct)
+    eventsRef.current?.close()
+    eventsRef.current = null
+    switchingRef.current = false
     setMuted(false)
     setPhase({ name: "ended", ticketNumber, reason })
   }
@@ -121,6 +231,12 @@ export function CallWidget({ open, onOpenChange }: { open: boolean; onOpenChange
   }
 
   function toggleMute() {
+    const track = direct.current?.mic.getAudioTracks()[0]
+    if (track) {
+      track.enabled = !track.enabled
+      setMuted(!track.enabled)
+      return
+    }
     const client = clientRef.current
     if (!client) return
     void (muted ? client.unmute() : client.mute())
@@ -128,6 +244,7 @@ export function CallWidget({ open, onOpenChange }: { open: boolean; onOpenChange
 
   function reset() {
     setCaptions([])
+    setAgentName(null)
     setError(null)
     setPhase({ name: "form" })
   }
@@ -176,8 +293,8 @@ export function CallWidget({ open, onOpenChange }: { open: boolean; onOpenChange
         {(phase.name === "form" || phase.name === "starting") && (
           <form onSubmit={start} className="flex flex-col gap-4">
             <p className="text-sm text-muted-foreground">
-              Call us from your browser. Tell us who you are so we can find your account, and our assistant will
-              pick up. If you need a person, it connects you, with everything you&apos;ve said.
+              Call us from your browser. Tell us who you are so we can find your account, and our assistant will pick
+              up. If you need a person, it connects you, with everything you&apos;ve said.
             </p>
             <label className="flex flex-col gap-1.5 text-sm font-medium">
               Name
@@ -232,6 +349,7 @@ export function CallWidget({ open, onOpenChange }: { open: boolean; onOpenChange
             since={phase.name === "live" ? phase.since : null}
             ticketNumber={phase.ticketNumber}
             captions={captions}
+            agentName={phase.name === "live" ? agentName : null}
             error={error}
           />
         )}
@@ -257,6 +375,8 @@ export function CallWidget({ open, onOpenChange }: { open: boolean; onOpenChange
             </button>
           </div>
         )}
+        {/* The agent's voice, after a handover. */}
+        <audio ref={audioRef} autoPlay className="hidden" />
       </div>
 
       {inCall && (
@@ -289,12 +409,15 @@ function LiveCall({
   since,
   ticketNumber,
   captions,
+  agentName,
   error,
 }: {
   connecting: boolean
   since: number | null
   ticketNumber: number
   captions: Caption[]
+  /** The agent the caller is talking with, after a handover. */
+  agentName: string | null
   error: string | null
 }) {
   const elapsed = useElapsed(since)
@@ -311,7 +434,13 @@ function LiveCall({
         </span>
       </div>
       <div className="text-center">
-        <p className="font-display text-xl">{connecting ? "Connecting…" : "You're talking with our assistant"}</p>
+        <p className="font-display text-xl">
+          {connecting
+            ? "Connecting…"
+            : agentName
+              ? `You're talking with ${agentName}`
+              : "You're talking with our assistant"}
+        </p>
         <p className="mt-1 text-sm text-muted-foreground tabular-nums">
           {connecting ? "This takes a few seconds" : elapsed} · Ref #{ticketNumber}
         </p>
@@ -341,4 +470,93 @@ function useElapsed(since: number | null): string {
   if (!since) return ""
   const seconds = Math.max(0, Math.floor((now - since) / 1000))
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+}
+
+/** The direct call with the agent after a handover: the connection, the caller's mic, the agent's voice. */
+interface DirectCall {
+  connection: RTCPeerConnection
+  mic: MediaStream
+  remote: MediaStream
+  /** The agent's candidates that arrived before their offer was applied. */
+  pending: RTCIceCandidateInit[]
+}
+
+/** Opens the caller's side of the direct call; `onConnected` runs once audio can flow. */
+async function openDirect(
+  iceServers: IceServer[],
+  send: (signal: CallSignal) => Promise<unknown>,
+  onConnected: () => void,
+): Promise<DirectCall> {
+  const mic = await navigator.mediaDevices.getUserMedia({ audio: true })
+  const connection = new RTCPeerConnection({ iceServers })
+  const remote = new MediaStream()
+  for (const track of mic.getTracks()) connection.addTrack(track, mic)
+  connection.addEventListener("track", (event) => remote.addTrack(event.track))
+  connection.addEventListener("icecandidate", (event) => {
+    const c = event.candidate
+    void send({
+      type: "candidate",
+      candidate: c
+        ? {
+            candidate: c.candidate,
+            sdpMid: c.sdpMid,
+            sdpMLineIndex: c.sdpMLineIndex,
+            usernameFragment: c.usernameFragment,
+          }
+        : null,
+    })
+  })
+  let connected = false
+  connection.addEventListener("connectionstatechange", () => {
+    if (process.env.NODE_ENV !== "production") console.debug("[call] direct connection", connection.connectionState)
+    if (connection.connectionState === "connected" && !connected) {
+      connected = true
+      onConnected()
+    }
+  })
+  return { connection, mic, remote, pending: [] }
+}
+
+function closeDirect(direct: { current: DirectCall | null }) {
+  direct.current?.connection.close()
+  direct.current?.mic.getTracks().forEach((track) => track.stop())
+  direct.current = null
+}
+
+/**
+ * Tells oneix the customer's call is over, so agents don't see it live any more. A beacon still goes
+ * out while the page closes.
+ */
+function reportEnded(tokenRef: { current: string | null }) {
+  const token = tokenRef.current
+  if (!token) return
+  tokenRef.current = null
+  const url = `${API_URL}/widget/calls/${encodeURIComponent(token)}/end`
+  if (navigator.sendBeacon?.(url)) return
+  void fetch(url, { method: "POST", keepalive: true }).catch(() => undefined)
+}
+
+/** Voice Gateway's live transcription, passed on as is by the Click To Call SDK; its shape varies. */
+type TranscriptionEvent = Record<string, unknown> & { messages?: Record<string, unknown>[] }
+
+const CALLER_ROLES = ["user", "customer", "caller", "human", "input", "local", "inbound"]
+
+function transcriptionText(data: TranscriptionEvent): string {
+  const parts = data.messages?.length ? data.messages : [data]
+  return parts
+    .map((m) => [m.text, m.transcript, m.message].find((v): v is string => typeof v === "string") ?? "")
+    .join(" ")
+    .trim()
+}
+
+/** The caller's own words, or the assistant's, from whichever field the event names the speaker in. */
+function transcriptionSpeaker(data: TranscriptionEvent): Caption["who"] {
+  const first = data.messages?.[0] ?? {}
+  for (const record of [data, first]) {
+    for (const key of ["role", "source", "speaker", "type", "originator", "direction", "from"]) {
+      const value = record[key]
+      if (typeof value === "string" && CALLER_ROLES.includes(value.toLowerCase())) return "You"
+    }
+  }
+  return "Assistant"
 }
