@@ -447,6 +447,8 @@ model VoiceCall {
   handedOverAt     DateTime?
   answeredAt       DateTime?
   endedAt          DateTime?
+  /// The conversation with the AI agent so far, as the Flow last sent it: [{ speaker, text, at }].
+  transcript       Json?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
