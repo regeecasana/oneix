@@ -37,6 +37,25 @@ const schema = z
     VOICE_SIP_REALM: z.string().min(1).optional(),
     /** Voice Gateway's secure WebSocket for softphones, for example wss://<gateway>:8443. */
     VOICE_GATEWAY_WSS_URL: z.url().optional(),
+    /**
+     * STUN and TURN servers for agents' call audio, as a JSON array of RTCIceServer, for example
+     * [{"urls":"turns:turn.example.com:443?transport=tcp","username":"u","credential":"p"}]. A TURN
+     * server over TCP 443 gets audio through networks that block UDP. Defaults to Google's STUN.
+     */
+    VOICE_ICE_SERVERS: z
+      .string()
+      .optional()
+      .transform((value, ctx) => {
+        if (!value?.trim()) return [{ urls: "stun:stun.l.google.com:19302" }];
+        try {
+          const servers = JSON.parse(value) as unknown;
+          if (Array.isArray(servers)) return servers as { urls: string | string[]; username?: string; credential?: string }[];
+        } catch {
+          // Reported below.
+        }
+        ctx.addIssue({ code: "custom", message: "VOICE_ICE_SERVERS must be a JSON array of ICE servers" });
+        return z.NEVER;
+      }),
     /** How long agents' softphones ring on a handover before the AI tells the caller nobody is free. */
     VOICE_RING_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(120).default(30),
   })

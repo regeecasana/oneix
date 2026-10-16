@@ -52,7 +52,10 @@ export class PresenceService {
     const now = Date.now();
     const record: PresenceRecord = {
       status,
-      since: previous && previous.status === status && now - previous.seenAt < PRESENCE_STALE_MS ? previous.since : now,
+      since:
+        previous && previous.status === status && now - previous.seenAt < PRESENCE_STALE_MS
+          ? previous.since
+          : now,
       seenAt: now,
     };
     await this.redis.hset(this.key(user.tenantId), user.id, JSON.stringify(record));
@@ -82,9 +85,12 @@ export class PresenceService {
     return realm ? `${PresenceService.sipUser(tenantId, userId)}@${realm}` : null;
   }
 
-  private async softphone(user: SessionUser): Promise<Pick<PresenceResponse, "softphone" | "softphoneUnavailable">> {
+  private async softphone(
+    user: SessionUser,
+  ): Promise<Pick<PresenceResponse, "softphone" | "softphoneUnavailable">> {
     const { VOICE_SIP_REALM: realm, VOICE_GATEWAY_WSS_URL: wsUri } = this.config;
-    if (!realm || !wsUri) return { softphone: null, softphoneUnavailable: "Voice calls aren't set up for oneix yet." };
+    if (!realm || !wsUri)
+      return { softphone: null, softphoneUnavailable: "Voice calls aren't set up for oneix yet." };
     if (!user.zendeskUserId) {
       return {
         softphone: null,
@@ -99,7 +105,16 @@ export class PresenceService {
       ? (JSON.parse(existing) as SoftphoneOwner)
       : { userId: user.id, tenantId: user.tenantId, password: randomBytes(18).toString("base64url") };
     await this.redis.set(key, JSON.stringify(owner), "EX", CREDENTIAL_TTL_SECONDS);
-    return { softphone: { sipUser, password: owner.password, realm, wsUri }, softphoneUnavailable: null };
+    return {
+      softphone: {
+        sipUser,
+        password: owner.password,
+        realm,
+        wsUri,
+        iceServers: this.config.VOICE_ICE_SERVERS,
+      },
+      softphoneUnavailable: null,
+    };
   }
 
   private async record(tenantId: string, userId: string): Promise<PresenceRecord | null> {

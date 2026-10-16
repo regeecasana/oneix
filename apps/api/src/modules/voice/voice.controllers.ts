@@ -16,6 +16,8 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiExcludeController, ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
+  CallSignal,
+  CallTranscriptResponse,
   FlowAckResponse,
   FlowCallEventRequest,
   FlowCallEventResponse,
@@ -23,6 +25,7 @@ import {
   FlowCallStartResponse,
   FlowHandoverRequest,
   FlowHandoverResponse,
+  FlowTranscriptRequest,
   LiveCall,
   LiveCallsResponse,
   PresenceResponse,
@@ -31,7 +34,7 @@ import {
   WidgetCallResponse,
 } from "@oneix/contracts";
 import type { Request } from "express";
-import type { Observable } from "rxjs";
+import { finalize, from, type Observable, switchMap } from "rxjs";
 import { ApiErrors, ApiSession } from "../../common/api-docs.js";
 import { CurrentUser, Public, type SessionUser } from "../../common/auth.js";
 import { APP_CONFIG, type AppConfig } from "../../config/config.js";
@@ -52,7 +55,12 @@ import { VoiceEventsService } from "./voice-events.service.js";
 @Public()
 @Controller("widget")
 export class WidgetController {
-  constructor(private readonly calls: VoiceCallsService) {}
+  private readonly logger = new Logger(WidgetController.name);
+
+  constructor(
+    private readonly calls: VoiceCallsService,
+    private readonly events: VoiceEventsService,
+  ) {}
 
   @Post("calls")
   @ApiOperation({
@@ -63,8 +71,52 @@ export class WidgetController {
   })
   @ApiOkResponse({ standardSchema: WidgetCallResponse })
   @ApiErrors(400, 404, 429, 502)
-  start(@Body({ schema: WidgetCallRequest }) body: WidgetCallRequest, @Req() request: Request): Promise<WidgetCallResponse> {
+  start(
+    @Body({ schema: WidgetCallRequest }) body: WidgetCallRequest,
+    @Req() request: Request,
+  ): Promise<WidgetCallResponse> {
     return this.calls.startFromWidget(body, request.ip ?? "unknown");
+  }
+
+  @Post("calls/:token/end")
+  @HttpCode(204)
+  @ApiOperation({
+    summary: "The customer hung up",
+    description:
+      "Sent by the widget when its call ends or the page closes, with the call token from starting it. " +
+      "Unknown or already ended calls are fine.",
+  })
+  async end(@Param("token") token: string): Promise<void> {
+    await this.calls.endFromWidget(token);
+  }
+
+  @Sse("calls/:token/events")
+  @ApiOperation({
+    summary: "The call's events, for the widget",
+    description:
+      "Server-Sent Events: `agent.answered` (switch the call over to the agent), `signal` (the agent's side of " +
+      "setting up the direct call), `call.ended`, and `call.missed`. The call token is the authorization.",
+  })
+  stream(@Param("token") token: string): Observable<MessageEvent> {
+    return from(this.calls.callForWidget(token)).pipe(
+      switchMap((call) => {
+        this.logger.log(`call #${call.ticketNumber}: the caller's widget is listening`);
+        return this.events.streamCall(call.id).pipe(
+          finalize(() => this.logger.log(`call #${call.ticketNumber}: the caller's widget stopped listening`)),
+        );
+      }),
+    );
+  }
+
+  @Post("calls/:token/signal")
+  @HttpCode(204)
+  @ApiOperation({
+    summary: "Set up the direct call with the agent",
+    description: "The widget's WebRTC answer and network candidates, relayed to the agent who answered.",
+  })
+  @ApiErrors(400, 404, 409)
+  async signal(@Param("token") token: string, @Body({ schema: CallSignal }) body: CallSignal): Promise<void> {
+    await this.calls.signalFromWidget(token, body);
   }
 }
 
@@ -81,7 +133,8 @@ export class FlowController {
   @HttpCode(200)
   @ApiOperation({
     summary: "The AI agent answered",
-    description: "Marks the call live in the workspace. Returns the ticket number and the caller's name for the greeting.",
+    description:
+      "Marks the call live in the workspace. Returns the ticket number and the caller's name for the greeting.",
   })
   @ApiOkResponse({ standardSchema: FlowCallStartResponse })
   @ApiErrors(401, 404)
@@ -127,6 +180,24 @@ export class FlowController {
     return this.calls.flowEvent(token, body);
   }
 
+  @Post("transcript")
+  @HttpCode(200)
+  @ApiOperation({
+    summary: "The conversation so far",
+    description:
+      "Sent after each of the AI agent's turns, with the Get Transcript node's output. The ticket shows it live; " +
+      "it goes on the Zendesk ticket once, as the handover note.",
+  })
+  @ApiOkResponse({ standardSchema: FlowAckResponse })
+  @ApiErrors(401, 404)
+  async transcript(
+    @Param("token") token: string,
+    @Body({ schema: FlowTranscriptRequest }) body: FlowTranscriptRequest,
+  ): Promise<FlowAckResponse> {
+    await this.calls.flowTranscript(token, body);
+    return { ok: true };
+  }
+
   @Post("missed")
   @HttpCode(200)
   @ApiOperation({ summary: "No agent answered", description: "The ticket stays open for a callback." })
@@ -166,7 +237,9 @@ export class SipRegistrationController {
 
   @Post("register")
   @HttpCode(200)
-  async register(@Req() request: RawBodyRequest<Request>): Promise<{ status: "ok" | "fail"; msg?: string; expires?: number }> {
+  async register(
+    @Req() request: RawBodyRequest<Request>,
+  ): Promise<{ status: "ok" | "fail"; msg?: string; expires?: number }> {
     const secret = this.config.VOICE_GATEWAY_WEBHOOK_SECRET;
     // Cognigy's Voice Gateway sends jambonz's signature under its own header name.
     const signature = request.get("vg-signature") ?? request.get("jambonz-signature");
@@ -185,7 +258,11 @@ export class SipRegistrationController {
     const owner = username ? await this.presence.owner(username) : null;
     const password = owner?.password ?? (username ? await this.widgets.passwordOf(username) : null);
     const complete = body.realm && body.nonce && body.uri && body.response;
-    if (!password || !complete || !digestMatches({ ...(body as DigestChallengeResponse), username: body.username! }, password)) {
+    if (
+      !password ||
+      !complete ||
+      !digestMatches({ ...(body as DigestChallengeResponse), username: body.username! }, password)
+    ) {
       this.logger.warn(
         `softphone registration refused ${JSON.stringify({
           reason: !password
@@ -221,17 +298,47 @@ export class VoiceController {
   ) {}
 
   @Get("calls")
-  @ApiOperation({ summary: "List live calls", description: "Calls with the AI agent, waiting for an agent, or with an agent." })
+  @ApiOperation({
+    summary: "List live calls",
+    description: "Calls with the AI agent, waiting for an agent, or with an agent.",
+  })
   @ApiOkResponse({ standardSchema: LiveCallsResponse })
   live(@CurrentUser() user: SessionUser): Promise<LiveCallsResponse> {
     return this.calls.live(user);
+  }
+
+  @Get("calls/:id/transcript")
+  @ApiOperation({
+    summary: "A call's conversation with the AI agent",
+    description: "Live while the AI agent talks.",
+  })
+  @ApiOkResponse({ standardSchema: CallTranscriptResponse })
+  @ApiErrors(404)
+  transcript(@CurrentUser() user: SessionUser, @Param("id") id: string): Promise<CallTranscriptResponse> {
+    return this.calls.transcript(user, id);
+  }
+
+  @Post("calls/:id/signal")
+  @HttpCode(204)
+  @ApiOperation({
+    summary: "Set up the direct call with the customer",
+    description: "The agent's WebRTC offer and network candidates, relayed to the customer's widget.",
+  })
+  @ApiErrors(400, 404, 409)
+  async signal(
+    @CurrentUser() user: SessionUser,
+    @Param("id") id: string,
+    @Body({ schema: CallSignal }) body: CallSignal,
+  ): Promise<void> {
+    await this.calls.signalFromAgent(user, id, body);
   }
 
   @Post("calls/:id/answer")
   @HttpCode(200)
   @ApiOperation({
     summary: "Answer a call",
-    description: "The first agent to answer takes the call and its ticket is assigned to them. 409 if another agent took it.",
+    description:
+      "The first agent to answer takes the call and its ticket is assigned to them. 409 if another agent took it.",
   })
   @ApiOkResponse({ standardSchema: LiveCall })
   @ApiErrors(404, 409)
@@ -241,7 +348,10 @@ export class VoiceController {
 
   @Post("calls/:id/end")
   @HttpCode(204)
-  @ApiOperation({ summary: "Mark a call ended", description: "Sent by the agent's softphone when the call ends." })
+  @ApiOperation({
+    summary: "Mark a call ended",
+    description: "Sent by the agent's softphone when the call ends.",
+  })
   @ApiErrors(404)
   async end(@CurrentUser() user: SessionUser, @Param("id") id: string): Promise<void> {
     await this.calls.end(user, id);
@@ -257,7 +367,8 @@ export class VoiceController {
   @Put("presence")
   @ApiOperation({
     summary: "Set your availability",
-    description: "Available agents are rung when the AI agent hands a call over. Sent again every 30 seconds to stay present.",
+    description:
+      "Available agents are rung when the AI agent hands a call over. Sent again every 30 seconds to stay present.",
   })
   @ApiOkResponse({ standardSchema: PresenceResponse })
   setPresence(
@@ -268,7 +379,12 @@ export class VoiceController {
   }
 
   @Sse("events")
-  @ApiOperation({ summary: "Live voice events", description: "Server-Sent Events: `calls.changed` when a call starts, changes, or ends." })
+  @ApiOperation({
+    summary: "Live voice events",
+    description:
+      "Server-Sent Events: `calls.changed` when a call starts, changes, or ends; `call.transcript` with " +
+      "`callId` when a call's transcript grows.",
+  })
   stream(@CurrentUser() user: SessionUser): Observable<MessageEvent> {
     return this.events.stream(user.tenantId);
   }

@@ -1,7 +1,11 @@
+import type { CallTranscriptLine } from "@oneix/contracts";
+
 /** One line of a call transcript. */
 export interface TranscriptLine {
   speaker: "Customer" | "AI agent";
   text: string;
+  /** When it was said (ISO), if the turn has a timestamp. */
+  at?: string;
 }
 
 /** Zendesk comments are limited to 64 KB; the note stays well under it. */
@@ -36,7 +40,8 @@ export function transcriptLines(transcript: unknown): TranscriptLine[] | string 
     const record = turn as Record<string, unknown>;
     const text = textOf(record);
     if (!text) continue;
-    lines.push({ speaker: speakerOf(record), text });
+    const at = timeOf(record.timestamp);
+    lines.push(at ? { speaker: speakerOf(record), text, at } : { speaker: speakerOf(record), text });
   }
   return lines;
 }
@@ -45,16 +50,27 @@ export function transcriptLines(transcript: unknown): TranscriptLine[] | string 
 export function transcriptNote(transcript: unknown, reason?: string): string {
   const read = transcriptLines(transcript);
   const body =
-    typeof read === "string"
-      ? read
-      : read.map((line) => `${line.speaker}: ${line.text}`).join("\n\n");
+    typeof read === "string" ? read : read.map((line) => `${line.speaker}: ${line.text}`).join("\n\n");
   const parts = [
     "Call transcript: AI agent and customer, before the handover",
     body || "(The AI agent sent no transcript.)",
   ];
   if (reason?.trim()) parts.push(`Handover reason: ${reason.trim()}`);
   const note = parts.join("\n\n");
-  return note.length > MAX_NOTE_CHARACTERS ? `${note.slice(0, MAX_NOTE_CHARACTERS)}\n\n(Transcript shortened.)` : note;
+  return note.length > MAX_NOTE_CHARACTERS
+    ? `${note.slice(0, MAX_NOTE_CHARACTERS)}\n\n(Transcript shortened.)`
+    : note;
+}
+
+/** The live transcript kept on the call, from what the Flow sent; plain text becomes one line. */
+export function callTranscript(transcript: unknown): CallTranscriptLine[] {
+  const read = transcriptLines(transcript);
+  if (typeof read === "string") return read ? [{ speaker: "ai", text: read, at: null }] : [];
+  return read.map((line) => ({
+    speaker: line.speaker === "Customer" ? "customer" : "ai",
+    text: line.text,
+    at: line.at ?? null,
+  }));
 }
 
 function turnsIn(value: unknown): unknown[] {
@@ -81,6 +97,12 @@ function speakerOf(turn: Record<string, unknown>): TranscriptLine["speaker"] {
     if (AI_ROLES.includes(role)) return "AI agent";
   }
   return "AI agent";
+}
+
+function timeOf(value: unknown): string | undefined {
+  if (typeof value !== "number" && typeof value !== "string") return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 function nested(value: unknown, key: string): unknown {

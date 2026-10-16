@@ -30,7 +30,11 @@ export const LIVE_CALL_STATES = ["ai", "queued", "agent"] as const satisfies rea
 
 /** Names and emails as the caller types them on the website. */
 export const WidgetCallRequest = z.object({
-  tenant: z.string().min(1).max(64).meta({ description: "The client workspace's slug.", example: "con-blinkcx2" }),
+  tenant: z
+    .string()
+    .min(1)
+    .max(64)
+    .meta({ description: "The client workspace's slug.", example: "con-blinkcx2" }),
   name: z.string().trim().min(1).max(120),
   email: z.email().max(254),
 });
@@ -105,7 +109,31 @@ export const FlowCallEventResponse = z.object({
 export type FlowCallEventResponse = z.infer<typeof FlowCallEventResponse>;
 
 /** Voice Gateway events meaning the agents' phones rang out or refused. */
-export const MISSED_CALL_EVENTS = ["NO_ANSWER", "USER_BUSY", "TRANSFER_DIAL_ERROR", "TRANSFER_REFER_ERROR"] as const;
+export const MISSED_CALL_EVENTS = [
+  "NO_ANSWER",
+  "USER_BUSY",
+  "TRANSFER_DIAL_ERROR",
+  "TRANSFER_REFER_ERROR",
+] as const;
+
+/** The conversation so far, sent by the Flow after each of the AI agent's turns. */
+export const FlowTranscriptRequest = z.looseObject({
+  /** The Get Transcript node's output, read like the handover's `transcript`. */
+  transcript: z.unknown(),
+});
+export type FlowTranscriptRequest = z.infer<typeof FlowTranscriptRequest>;
+
+/** One line of the conversation with the AI agent. */
+export const CallTranscriptLine = z.object({
+  speaker: z.enum(["customer", "ai"]),
+  text: z.string(),
+  /** When it was said, if the Flow sent it. */
+  at: z.iso.datetime().nullable(),
+});
+export type CallTranscriptLine = z.infer<typeof CallTranscriptLine>;
+
+export const CallTranscriptResponse = z.object({ lines: z.array(CallTranscriptLine) });
+export type CallTranscriptResponse = z.infer<typeof CallTranscriptResponse>;
 
 /** A call as agents see it. */
 export const LiveCall = z.object({
@@ -137,6 +165,8 @@ export const SoftphoneCredentials = z.object({
   password: z.string(),
   realm: z.string(),
   wsUri: z.string(),
+  /** STUN and TURN servers for the call audio, as RTCPeerConnection takes them. */
+  iceServers: z.array(z.lazy(() => IceServer)),
 });
 export type SoftphoneCredentials = z.infer<typeof SoftphoneCredentials>;
 
@@ -151,3 +181,43 @@ export type PresenceResponse = z.infer<typeof PresenceResponse>;
 
 /** SIP headers on calls rung to agents. */
 export const VOICE_SIP_HEADERS = { call: "X-Oneix-Call", ticket: "X-Oneix-Ticket" } as const;
+
+/**
+ * Setting up the direct call between the customer's widget and the agent's browser after a
+ * handover: the WebRTC offer and answer, and network candidates as they're found. oneix relays them.
+ */
+export const CallSignal = z.discriminatedUnion("type", [
+  z.object({ type: z.enum(["offer", "answer"]), sdp: z.string().max(20_000) }),
+  z.object({
+    type: z.literal("candidate"),
+    /** Null once the sender has found all its candidates. */
+    candidate: z
+      .object({
+        candidate: z.string().max(1_000),
+        sdpMid: z.string().nullable().optional(),
+        sdpMLineIndex: z.number().int().nullable().optional(),
+        usernameFragment: z.string().nullable().optional(),
+      })
+      .nullable(),
+  }),
+]);
+export type CallSignal = z.infer<typeof CallSignal>;
+
+/** STUN and TURN servers, as RTCPeerConnection takes them. */
+export const IceServer = z.object({
+  urls: z.union([z.string(), z.array(z.string())]),
+  username: z.string().optional(),
+  credential: z.string().optional(),
+});
+export type IceServer = z.infer<typeof IceServer>;
+
+/** What the customer's widget hears about its call, on GET /widget/calls/{token}/events. */
+export type WidgetCallEvent =
+  /** An agent answered: wait for their offer, then switch the call over to them. */
+  | { type: "agent.answered"; agentName: string; iceServers: IceServer[] }
+  | { type: "signal"; signal: CallSignal }
+  /** The agent hung up. */
+  | { type: "call.ended" }
+  /** Nobody answered in time; the ticket stays open for a callback. */
+  | { type: "call.missed"; message: string }
+  | { type: "ping" };

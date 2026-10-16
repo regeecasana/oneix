@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { digestMatches, gatewaySignatureMatches } from "./sip-auth.js";
-import { transcriptLines, transcriptNote } from "./transcript.js";
+import { callTranscript, transcriptLines, transcriptNote } from "./transcript.js";
 import { busyMessage } from "./voice-calls.service.js";
 
 const md5 = (value: string) => createHash("md5").update(value).digest("hex");
@@ -45,7 +45,13 @@ describe("transcriptNote", () => {
 });
 
 describe("digestMatches", () => {
-  const base = { method: "REGISTER", username: "oneix-abc", realm: "sip.example.com", nonce: "n1", uri: "sip:sip.example.com" };
+  const base = {
+    method: "REGISTER",
+    username: "oneix-abc",
+    realm: "sip.example.com",
+    nonce: "n1",
+    uri: "sip:sip.example.com",
+  };
   const ha1 = md5("oneix-abc:sip.example.com:secret");
   const ha2 = md5("REGISTER:sip:sip.example.com");
 
@@ -59,7 +65,9 @@ describe("digestMatches", () => {
 
   it("refuses a wrong password or another algorithm", () => {
     expect(digestMatches({ ...base, response: md5(`${ha1}:n1:${ha2}`) }, "wrong")).toBe(false);
-    expect(digestMatches({ ...base, algorithm: "SHA-256", response: md5(`${ha1}:n1:${ha2}`) }, "secret")).toBe(false);
+    expect(
+      digestMatches({ ...base, algorithm: "SHA-256", response: md5(`${ha1}:n1:${ha2}`) }, "secret"),
+    ).toBe(false);
   });
 });
 
@@ -84,5 +92,21 @@ describe("gatewaySignatureMatches", () => {
 describe("busyMessage", () => {
   it("reads the reference number digit by digit", () => {
     expect(busyMessage(9800)).toContain("Your reference number is 9 8 0 0.");
+  });
+});
+
+describe("callTranscript", () => {
+  it("keeps who spoke and when, from Get Transcript's turns", () => {
+    const at = Date.UTC(2026, 9, 16, 1, 0, 0);
+    expect(
+      callTranscript([
+        { role: "user", payload: { text: "I need a refund" }, timestamp: at },
+        { source: "assistant", text: "Sure, what's the order number?" },
+        { role: "user", payload: { data: {} } },
+      ]),
+    ).toEqual([
+      { speaker: "customer", text: "I need a refund", at: new Date(at).toISOString() },
+      { speaker: "ai", text: "Sure, what's the order number?", at: null },
+    ]);
   });
 });
