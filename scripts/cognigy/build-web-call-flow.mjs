@@ -79,7 +79,7 @@ const JOB = {
   description:
     "Answer the caller's question when it is general information you know. For anything that needs their account, a decision, or a person, collect what happened, when, and any reference number (order, booking, or the last four digits of a card), then transfer them to a human agent with a one-sentence summary.",
   instructions: [
-    "The caller's name is {{context.oneixStart.firstName}}. On your first turn, greet them by first name, say you're Adam from Acme Support, and ask how you can help.",
+    "The caller's name is {{context.oneixStart && context.oneixStart.result && context.oneixStart.result.firstName ? context.oneixStart.result.firstName : 'not known'}}. On your first turn, greet them by first name, say you're Adam from Acme Support, and ask how you can help.",
     "Transfer to a human (use transfer_to_human) when:",
     "- the caller asks for a person, an agent, or a manager;",
     "- the request needs their account, a refund, a dispute, a cancellation, or an approval;",
@@ -116,40 +116,53 @@ const CALL_EVENTS = ["CALL_COMPLETED", "CALL_FAILED", "NO_ANSWER", "USER_BUSY", 
 const data = input.data || {};
 const payload = data.payload || {};
 const event = data.event || payload.event || null;
-context.oneixEvent = CALL_EVENTS.includes(event) ? event : null;`,
+context.oneixEvent = CALL_EVENTS.includes(event) ? event : null;
+
+// Once an agent has the call, Voice Gateway still reports the bridge's progress to the Flow. Adam
+// must stay quiet then (running him again would dial again and pull the caller out of the bridge),
+// so these inputs take the call event branch, which oneix ignores.
+if (event === "TRANSFER_DIAL_SUCCESS") context.oneixTransferred = true;
+context.oneixQuiet = !!context.oneixTransferred && !context.oneixEvent;
+// The agent's side ended: oneix ends the call, and the caller's side is hung up.
+context.oneixHangUp = context.oneixQuiet && (payload.dial_call_status || data.dial_call_status) === "completed";
+if (context.oneixHangUp) context.oneixEvent = "CALL_COMPLETED";`,
 
   afterEvent: `// oneix says what a call event means: "busy" when no agent answered.
-const result = context.oneixEventResult || {};
+// An HTTP Request node keeps a successful answer under "result".
+const result = (context.oneixEventResult || {}).result || {};
 if (result.action === "busy" && result.say) {
   api.say(result.say);
-  api.output(null, { _cognigy: { "_voice-gateway2": { json: { verb: "hangup" } } } });
+  hangUp();
+} else if (context.oneixHangUp) {
+  hangUp();
+}
+
+// Voice Gateway verbs go out keyed by name, like the Hang Up node's own output.
+function hangUp() {
+  api.output(null, { _cognigy: { _voiceGateway2: { json: { hangup: { headers: { "X-Reason": "No agent available" } } } } } });
 }`,
 
-  ring: `// oneix returns the available agents to ring and what to tell the caller.
-const handover = context.oneixHandover || {};
+  ring: `// oneix returns what to tell the caller, and the agents it is ringing.
+// An HTTP Request node keeps a successful answer under "result".
+const handover = (context.oneixHandover || {}).result || {};
 api.say(handover.say || "Sorry, I can't connect you to a colleague right now. Please try again later.");
 if (handover.targets && handover.targets.length > 0) {
-  // Rings every available agent at once; the first to answer gets the call.
-  api.output(null, {
-    _cognigy: {
-      "_voice-gateway2": {
-        json: {
-          verb: "dial",
-          actionHook: "dial",
-          target: handover.targets,
-          headers: handover.headers,
-          timeout: handover.timeout,
-        },
-      },
-    },
-  });
+  // The agent who answers takes the call over directly from the caller's browser, outside Voice
+  // Gateway. Until then the caller stays on this call, and Adam stays quiet.
+  context.oneixTransferred = true;
 } else {
-  api.output(null, { _cognigy: { "_voice-gateway2": { json: { verb: "hangup" } } } });
+  api.output(null, { _cognigy: { _voiceGateway2: { json: { hangup: { headers: { "X-Reason": "No agent available" } } } } } });
 }`,
 };
 
-/** An HTTP Request node to oneix, storing the response in the Context under `contextKey`. */
-function oneixRequest(label, path, payload, contextKey) {
+/** The event the Flow reports: the call event, or a bridge update while an agent has the call. */
+const CALL_EVENT_VALUE = "{{context.oneixEvent || 'AGENT_ON_CALL'}}";
+
+/**
+ * An HTTP Request node to oneix, storing the response in the Context under `contextKey`. `options`
+ * overrides settings, such as `timeout` (milliseconds) or `async` (don't wait for the answer).
+ */
+function oneixRequest(label, path, payload, contextKey, options = {}) {
   return {
     label,
     node: NODES.http,
@@ -161,6 +174,8 @@ function oneixRequest(label, path, payload, contextKey) {
       payload,
       storeLocation: "context",
       contextKey,
+      timeout: 10000,
+      ...options,
     },
   };
 }
@@ -196,6 +211,8 @@ const FIELDS = {
       labels: ["Response Store Location", "Store Location", "Store Response"],
     },
     contextKey: { keys: ["contextKey"], labels: ["Context Key"] },
+    timeout: { keys: ["timeout"], labels: ["Timeout"], optional: true },
+    async: { keys: ["async"], labels: ["Async"], optional: true },
   },
   aiAgent: {
     agent: { keys: ["aiAgent", "aiAgentId", "agent"], labels: ["AI Agent"] },
@@ -317,7 +334,7 @@ async function main() {
   const eventElse = childOf(isEvent, "else");
 
   const eventRequest = await add(
-    oneixRequest("oneix: call event", "event", { event: "{{context.oneixEvent}}" }, "oneixEventResult"),
+    oneixRequest("oneix: call event", "event", { event: CALL_EVENT_VALUE }, "oneixEventResult"),
     eventThen,
     "append",
   );
@@ -350,6 +367,28 @@ async function main() {
       },
     },
     firstTurn.id,
+    "append",
+  );
+
+  // After each of Adam's turns, the conversation so far goes to oneix, which shows it on the ticket live.
+  const liveTranscript = await add(
+    {
+      label: "Get transcript (live)",
+      node: NODES.getTranscript,
+      settings: { limit: 50, storeLocation: "input", inputKey: "liveTranscript" },
+    },
+    aiAgentNode.id,
+    "append",
+  );
+  await add(
+    oneixRequest(
+      "oneix: transcript",
+      "transcript",
+      { transcript: { $cs: { script: "input.liveTranscript", type: "object" } } },
+      "oneixTranscript",
+      { async: true },
+    ),
+    liveTranscript.id,
     "append",
   );
 
@@ -386,6 +425,8 @@ async function main() {
         transcript: { $cs: { script: "input.transcript", type: "object" } },
       },
       "oneixHandover",
+      // oneix answers at once (the Zendesk note follows), but allow for a slow tunnel.
+      { timeout: 20000 },
     ),
     transcript.id,
     "append",
@@ -539,19 +580,20 @@ function same(a, b) {
 }
 
 /**
- * An If condition as a rule, the If node's own default form: a CognigyScript expression on the left
- * compared with a value. (A plain script condition was saved but not evaluated, leaving the default
- * rule "1 equals 1", which is always true.)
+ * An If condition as JavaScript, evaluated against the input and Context. (A rule with a
+ * CognigyScript ternary on the left never matched.)
  */
-function ifRule(expression, equals) {
-  return { type: "rule", condition: "", rule: { left: `{{${expression}}}`, operand: "eq", right: equals } };
+function ifCondition(script) {
+  return { type: "condition", condition: script, rule: { left: "1", operand: "eq", right: "1" } };
 }
 
 /** The If nodes the script owns, by label, with their conditions. */
 function ifRules() {
   return {
-    "Call event?": ifRule("context.oneixEvent ? 'event' : 'none'", "event"),
-    "First turn?": ifRule("context.oneixStart ? 'started' : 'new'", "new"),
+    // Also while an agent has the call: Adam stays out of it.
+    "Call event?": ifCondition("!!context.oneixEvent || !!context.oneixQuiet"),
+    // oneixStart holds oneix's answer, or the error if the request failed: either way, asked once.
+    "First turn?": ifCondition("!context.oneixStart"),
   };
 }
 
@@ -701,7 +743,19 @@ async function updateCodeNodes(flowName) {
   const chart = await api("GET", `/v2.0/flows/${target._id}/chart`);
   let updated = 0;
   const rules = ifRules();
+  // Other settings the script keeps current, by node label.
+  const SETTINGS = {
+    "oneix: call event": { payloadJSON: JSON.stringify({ event: CALL_EVENT_VALUE }, null, 2) },
+    Adam: { instructions: JOB.instructions },
+    "oneix: hand over": { timeout: 20000 },
+  };
   for (const node of chart.nodes) {
+    if (SETTINGS[node.label]) {
+      await api("PATCH", `/v2.0/flows/${target._id}/chart/nodes/${node._id}`, { config: SETTINGS[node.label] });
+      console.log(`Updated the node "${node.label}".`);
+      updated++;
+      continue;
+    }
     if (node.type === "if" && rules[node.label]) {
       await api("PATCH", `/v2.0/flows/${target._id}/chart/nodes/${node._id}`, {
         config: { condition: rules[node.label] },
