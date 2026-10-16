@@ -190,9 +190,14 @@ Start
             AI Agent: Adam (job: front-line support and handover)
             └─ Tool: transfer_to_human (reason)
                └─ Get Transcript → HTTP Request → oneix /handover → Code: ring agents
+            Get Transcript (live) → HTTP Request → oneix /transcript (async)   the ticket shows the call live
 ```
 
+**Branches in Cognigy.** A Then, Else, or tool branch runs the nodes that follow it. Nodes added as its *children* (through the API) show under it in the editor all the same but never run, so the script appends them. If conditions are JavaScript (`!context.oneixStart`); a rule comparing a CognigyScript ternary never matched.
+
 oneix makes the decisions (missed or ended, what to say when nobody is free), so the Flow needs no branches for them.
+
+**While an agent has the call.** Voice Gateway keeps reporting the bridge to the Flow (`TRANSFER_DIAL_SUCCESS`, then the dial's result). The settings node marks the call transferred, and those inputs take the call event branch, which oneix ignores, so Adam stays quiet. Running him again would dial again and pull the caller out of the bridge: connected, but silent both ways. When the agent hangs up (`dial_call_status: completed`), oneix ends the call and the Flow hangs up the caller. Nothing may go to Voice Gateway during the bridge: a **Set Session Config** node belongs in the *First turn?* branch (before *oneix: call started*), not at the Flow's start, where it would resend its settings on every input and separate the two sides of the call.
 
 **If the script stops.** It checks every node type and setting against Cognigy's own node descriptors before creating anything. If one doesn't match, it creates nothing, removes the empty Flow, and writes `cognigy-flow-report.json` with the details (no secrets). Send that file over to get the script adjusted. To look at the descriptors yourself: `npm run cognigy:flow -- --inspect`.
 

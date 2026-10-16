@@ -7,9 +7,12 @@ The first voice feature, built on **Cognigy, oneix, and Zendesk** only. The call
 1. The customer opens the contact center page (`apps/landing`), enters their name and email, and starts a call. The call widget is built on the Cognigy **Click To Call SDK**.
 2. oneix finds or creates the customer in Zendesk, opens a ticket for the call, and returns a **call token**. The widget passes it to the SDK as `userId`, so it becomes the caller's SIP user and the Cognigy Flow reads it as `input.userId`.
 3. The AI agent answers. The Flow tells oneix, and the call appears in the workspace: **Live calls** in the sidebar, and a **Call in progress** banner on the ticket.
-4. When the AI agent hands over, the Flow sends oneix the conversation. oneix adds it to the ticket as an **internal note**, in oneix and Zendesk, and returns the softphones of every **available** agent.
-5. Voice Gateway rings those agents at once. Each sees a pop-up with the caller and ticket. The first to answer gets the call; the ticket is assigned to them and opens, with the AI conversation on it, so the customer doesn't repeat themselves.
-6. If nobody answers in 30 seconds, the AI agent says so, gives the ticket number, and ends the call. The ticket stays open for a callback.
+4. When the AI agent hands over, the Flow sends oneix the conversation. oneix adds it to the ticket as an **internal note**, in oneix and Zendesk. The AI agent says it's connecting the caller and then stays quiet.
+5. Every **available** agent gets a pop-up with the caller and ticket. The first to answer gets the call; the ticket is assigned to them and opens, with the AI conversation on it, so the customer doesn't repeat themselves.
+6. **The call leaves Cognigy.** The agent's browser and the customer's widget connect directly (WebRTC), with oneix relaying the setup: offer, answer, network candidates. Once the direct call is up, the widget hangs up on Voice Gateway. Either side hanging up ends the call for both.
+7. If nobody answers within the ring timeout (30 seconds), the widget tells the caller the agents are busy and gives the ticket number. The ticket stays open for a callback.
+
+**Why direct.** Voice Gateway's bridge between two browsers (the Click To Call widget and an agent softphone registered on Voice Gateway) connected but carried no audio. For website calls both ends are browsers oneix controls, so the agent part doesn't need it, and oneix owns that part for recording, transcription, and summaries later. Voice Gateway stays for the AI part, and for phone numbers and NiCE CXone later.
 
 Only the AI part of the call is transcribed in this version. Transcribing the agent's part comes later.
 
@@ -19,10 +22,12 @@ Only the AI part of the call is transcribed in this version. Transcribing the ag
 |---|---|
 | Contact center page and call widget | `apps/landing` (port 3002) |
 | Website call API: ticket and token | `POST /widget/calls` |
-| Flow API: start, handover, event (or missed and ended) | `POST /voice/flow/calls/{token}/…` |
-| Softphone registration webhook for Voice Gateway | `POST /voice/sip/register` |
+| Flow API: start, transcript, handover, event (or missed and ended) | `POST /voice/flow/calls/{token}/…` |
+| The widget's call events and direct-call setup | `GET /widget/calls/{token}/events`, `POST /widget/calls/{token}/signal`, `POST /widget/calls/{token}/end` |
+| The agent's direct-call setup | `POST /voice/calls/{id}/signal` |
+| Softphone registration webhook for Voice Gateway (not used by the direct handover) | `POST /voice/sip/register` |
 | Agent API: live calls, answer, end, availability, live events | `/voice/calls`, `/voice/presence`, `/voice/events` |
-| Agent softphone (JsSIP), pop-up, live calls, banner | `apps/web/features/voice` |
+| Agent softphone (WebRTC), pop-up, live calls, banner | `apps/web/features/voice` |
 
 All endpoints are in the API reference at `/docs`, under **Voice**.
 
@@ -120,6 +125,8 @@ api.output(null, {
 
 `event`: pass any Voice Gateway call event as `{ "event": "NO_ANSWER" }`. `CALL_COMPLETED` ends the call; `NO_ANSWER`, `USER_BUSY`, `TRANSFER_DIAL_ERROR`, and `TRANSFER_REFER_ERROR` mark it missed and return `{ "action": "busy", "say": "…" }`; anything else returns `{ "action": "none", "say": null }`.
 
+`transcript`: after each of Adam's turns, `{ "transcript": <Get Transcript output> }`. oneix keeps it on the call and pushes `call.transcript` on `/voice/events`, so the ticket shows the conversation live while Adam has the call. Zendesk gets it once, as the handover note, which oneix writes after answering `handover` (Zendesk can take longer than the Flow waits).
+
 `missed` and `ended` (for a hand-built Flow): `{ "ok": true }`.
 
 The Flow can be built with `npm run cognigy:flow`; see [11-voice-setup-guide.md](11-voice-setup-guide.md), part 5.
@@ -128,14 +135,14 @@ Errors: `401` without the right bearer token, `404` for an unknown call token, `
 
 ## Agents
 
-- **Available for calls**, top right in the workspace, makes an agent's browser register its softphone with Voice Gateway and puts them on the list of agents to ring. The workspace checks in every 30 seconds; an agent who closes it drops off within about a minute.
+- **Available for calls**, top right in the workspace, puts an agent on the list of agents to ring. The workspace checks in every 30 seconds; an agent who closes it drops off within about a minute.
 - Agents must be linked to a Zendesk user to take calls, because the ticket is assigned to them.
 - The incoming-call pop-up shows the caller, email, and ticket. **Answer and open ticket** connects the call and opens the ticket. The top bar shows the call with mute and hang up.
 
 ## Try it locally
 
 1. `npm start` runs the API, worker, workspace (3000), and landing page (3002).
-2. In the workspace, set yourself **Available for calls**. The dot turns green once the softphone registers.
+2. In the workspace, set yourself **Available for calls**.
 3. Open http://localhost:3002, click **Talk to us**, and start a call.
 4. Talk to the AI agent and ask for a person. The pop-up rings in the workspace.
 
@@ -155,4 +162,6 @@ These come from documentation that doesn't spell them out, so check them on the 
 - **The customer's email isn't verified.** Anyone can type any email; the ticket goes to that requester. Authenticating callers is the next step.
 - **Only the AI part is transcribed.**
 - **The integration user.** Notes written by oneix (the call note and the transcript) are credited to the Zendesk user behind the connection's credentials. A dedicated "oneix" Zendesk user keeps them apart from a real admin.
+- **Networks.** The two browsers find each other with STUN. Networks that block it (strict company firewalls, some mobile carriers) need a TURN server in `VOICE_ICE_SERVERS`; without one the agent sees "The call's audio couldn't connect".
+- **The ring timeout runs in the API process.** If the API restarts while a call rings, the call is marked missed later by the stale-call cleanup, without telling the caller.
 - **Rate limit.** Ten calls per address every ten minutes, per API instance, so a public form can't flood Zendesk with tickets.
