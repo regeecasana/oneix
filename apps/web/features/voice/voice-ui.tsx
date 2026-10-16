@@ -1,6 +1,6 @@
 "use client"
 
-import type { LiveCall, PresenceResponse, PresenceStatus } from "@oneix/contracts"
+import type { LiveCall, PresenceResponse, PresenceStatus, ThreadEntry } from "@oneix/contracts"
 import { Bot, Headset, Mic, MicOff, Phone, PhoneIncoming, PhoneOff } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -18,7 +18,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { useLiveCalls, useSetPresence } from "./queries"
+import { useCallTranscript, useLiveCalls, useSetPresence } from "./queries"
 import { useSoftphone } from "./softphone"
 
 const stateLabels: Record<LiveCall["state"], string> = {
@@ -289,6 +289,41 @@ export function LiveCallBanner({ ticketNumber }: { ticketNumber: number }) {
       </Badge>
     </div>
   )
+}
+
+/**
+ * While the AI agent has the call, its conversation as thread entries, live: one per line, after a
+ * marker. From the handover on, the transcript note on the ticket holds it instead.
+ */
+export function useLiveTranscriptEntries(ticketNumber: number): ThreadEntry[] {
+  const calls = useLiveCalls()
+  const call = calls.data?.items.find((c) => c.ticketNumber === ticketNumber)
+  const showing = call !== undefined && call.state === "ai"
+  const transcript = useCallTranscript(showing ? call.id : undefined)
+  if (!showing) return []
+  const lines = transcript.data?.lines ?? []
+  const since = call.startedAt ?? new Date().toISOString()
+  return [
+    {
+      id: `live-${call.id}`,
+      kind: "message",
+      body: "Live call: the AI agent's conversation as it happens. It goes on the ticket as an internal note at handover.",
+      author: { name: "oneix", type: "system", isYou: false },
+      createdAt: since,
+    },
+    ...lines.map(
+      (line, i): ThreadEntry => ({
+        id: `live-${call.id}-${i}`,
+        kind: "message",
+        body: line.text,
+        author:
+          line.speaker === "customer"
+            ? { name: call.customerName, type: "customer", isYou: false }
+            : { name: "AI agent", type: "agent", isYou: false },
+        createdAt: line.at ?? since,
+      }),
+    ),
+  ]
 }
 
 /** Number of live calls, for the rail. */

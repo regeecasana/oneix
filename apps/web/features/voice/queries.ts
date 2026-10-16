@@ -1,10 +1,20 @@
-import type { LiveCall, LiveCallsResponse, PresenceResponse, PresenceStatus } from "@oneix/contracts";
+import type {
+  CallTranscriptResponse,
+  LiveCall,
+  LiveCallsResponse,
+  PresenceResponse,
+  PresenceStatus,
+} from "@oneix/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { API_URL, api } from "@/lib/api";
 
 const liveCallsKey = ["voice", "calls"] as const;
 const presenceKey = ["voice", "presence"] as const;
+
+/** Every voice event, re-dispatched on window for listeners outside React Query, like the softphone. */
+export const VOICE_EVENT = "oneix:voice-event";
+const transcriptKey = (callId: string) => ["voice", "transcript", callId] as const;
 
 /** Presence is kept by checking in; the API forgets an agent who stops. */
 const PRESENCE_HEARTBEAT_MS = 30_000;
@@ -24,6 +34,15 @@ export function useLiveCallForTicket(ticketNumber: number): LiveCall | undefined
   return useLiveCalls().data?.items.find((call) => call.ticketNumber === ticketNumber);
 }
 
+/** A call's conversation with the AI agent, kept current by the voice event stream. */
+export function useCallTranscript(callId: string | undefined) {
+  return useQuery({
+    queryKey: transcriptKey(callId ?? ""),
+    queryFn: () => api<CallTranscriptResponse>(`/voice/calls/${callId}/transcript`),
+    enabled: Boolean(callId),
+  });
+}
+
 /** Listens to the workspace's voice events and refreshes the live calls when they change. */
 export function useVoiceEvents() {
   const queryClient = useQueryClient();
@@ -31,8 +50,13 @@ export function useVoiceEvents() {
     const source = new EventSource(`${API_URL}/voice/events`, { withCredentials: true });
     source.onmessage = (message) => {
       try {
-        const event = JSON.parse(message.data as string) as { type: string };
+        const event = JSON.parse(message.data as string) as { type: string; callId?: string };
         if (event.type === "calls.changed") void queryClient.invalidateQueries({ queryKey: liveCallsKey });
+        if (event.type === "call.transcript" && event.callId) {
+          void queryClient.invalidateQueries({ queryKey: transcriptKey(event.callId) });
+        }
+        // The softphone listens for its call's setup messages.
+        window.dispatchEvent(new CustomEvent(VOICE_EVENT, { detail: event }));
       } catch {
         // Not an event we know.
       }

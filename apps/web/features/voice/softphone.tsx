@@ -1,20 +1,31 @@
 "use client"
 
-import { type SoftphoneCredentials, VOICE_SIP_HEADERS } from "@oneix/contracts"
-import type { RTCSession } from "jssip/lib/RTCSession"
-import type { RTCSessionEvent, UA } from "jssip/lib/UA"
+import type {
+  CallSignal,
+  IceServer,
+  SoftphoneCredentials,
+} from "@oneix/contracts"
 import { useRouter } from "next/navigation"
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { toast } from "sonner"
-import { ApiError } from "@/lib/api"
-import { useAnswerCall, useEndCall } from "./queries"
+import { API_URL, ApiError, api } from "@/lib/api"
+import { useAnswerCall, useEndCall, useLiveCalls, VOICE_EVENT } from "./queries"
 
 export type SoftphoneStatus = "off" | "connecting" | "registered" | "failed"
 
 export interface IncomingCall {
   callId: string | null
   ticketNumber: number | null
-  /** How Voice Gateway identifies the caller, until the live call is known. */
+  /** Who is calling, for the pop-up. */
   caller: string
 }
 
@@ -42,10 +53,16 @@ export function useSoftphone(): Softphone {
   return softphone
 }
 
+/** Without configured servers, Google's STUN helps the two browsers find a way to each other. */
+const DEFAULT_ICE_SERVERS: IceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+]
+
 /**
- * The agent's phone in the browser. While the agent is available it registers with Voice Gateway
- * (JsSIP over WebSocket), so a handover from the AI agent rings here. Answering opens the call's
- * ticket.
+ * The agent's phone in the browser. When the AI agent hands a website call over, available agents
+ * get the pop-up; the first to answer talks with the customer directly, browser to browser. oneix
+ * relays the setup (offer, answer, network candidates); the audio doesn't go through Cognigy or
+ * Voice Gateway. Answering opens the call's ticket.
  */
 export function SoftphoneProvider({
   credentials,
@@ -57,147 +74,286 @@ export function SoftphoneProvider({
   children: ReactNode
 }) {
   const router = useRouter()
+  const calls = useLiveCalls()
   const answerCall = useAnswerCall()
   const endCall = useEndCall()
-  // What JsSIP last reported, for the credentials it was running with.
-  const [reported, setReported] = useState<{ key: string; status: SoftphoneStatus; error: string | null } | null>(null)
-  const phoneKey = enabled && credentials ? `${credentials.sipUser}:${credentials.password}` : null
-  const current = phoneKey !== null && reported?.key === phoneKey ? reported : null
-  const status: SoftphoneStatus = phoneKey === null ? "off" : (current?.status ?? "connecting")
-  const error = current?.error ?? null
-  const [incoming, setIncoming] = useState<IncomingCall | null>(null)
-  const [active, setActive] = useState<ActiveCall | null>(null)
-  const sessionRef = useRef<RTCSession | null>(null)
+  // The call this agent answered. It's over once it leaves the live calls (the customer hung up) or
+  // stops being the agent's (missed); "queued" covers the moment before the list catches up.
+  const [answered, setActive] = useState<ActiveCall | null>(null)
+  const answeredCall = answered
+    ? calls.data?.items.find((c) => c.id === answered.callId)
+    : undefined
+  const stillOn =
+    answered !== null &&
+    (!calls.data ||
+      (answeredCall !== undefined &&
+        ["queued", "agent"].includes(answeredCall.state)))
+  const active = stillOn ? answered : null
+  // Calls this agent declined: they keep ringing for others, not here.
+  const [declined, setDeclined] = useState<ReadonlySet<string>>(() => new Set())
+  const connectionRef = useRef<RTCPeerConnection | null>(null)
+  const micRef = useRef<MediaStream | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  // Handlers registered with JsSIP read the latest state through refs.
-  const busyRef = useRef(false)
-  const activeRef = useRef<ActiveCall | null>(null)
-  useEffect(() => {
-    busyRef.current = incoming !== null || active !== null
-    activeRef.current = active
-  }, [incoming, active])
+  // The customer's candidates that arrive before their answer, applied once it's set.
+  const pendingCandidates = useRef<RTCIceCandidateInit[]>([])
+  const iceServers = credentials?.iceServers?.length
+    ? credentials.iceServers
+    : DEFAULT_ICE_SERVERS
 
-  const clearCall = useCallback(() => {
-    sessionRef.current = null
-    setIncoming(null)
-    setActive(null)
+  const status: SoftphoneStatus = enabled ? "registered" : "off"
+
+  // A call waiting for an agent rings here while this agent is available and free.
+  const waiting =
+    enabled && !active
+      ? calls.data?.items.find(
+          (c) => c.state === "queued" && !declined.has(c.id)
+        )
+      : undefined
+  const incoming = useMemo<IncomingCall | null>(
+    () =>
+      waiting
+        ? {
+            callId: waiting.id,
+            ticketNumber: waiting.ticketNumber,
+            caller: waiting.customerName,
+          }
+        : null,
+    [waiting]
+  )
+
+  /** Stops the audio, without telling oneix. */
+  const releaseMedia = useCallback(() => {
+    connectionRef.current?.close()
+    connectionRef.current = null
+    micRef.current?.getTracks().forEach((track) => track.stop())
+    micRef.current = null
+    pendingCandidates.current = []
     if (audioRef.current) audioRef.current.srcObject = null
   }, [])
 
-  const reportEnded = endCall.mutate
+  // The call ended elsewhere (the customer hung up, or it was missed): stop the audio.
+  const activeCallId = active?.callId ?? null
   useEffect(() => {
-    if (!enabled || !credentials) return
-    const key = `${credentials.sipUser}:${credentials.password}`
-    const report = (status: SoftphoneStatus, error: string | null = null) => setReported({ key, status, error })
+    if (answered && !stillOn) releaseMedia()
+  }, [answered, stillOn, releaseMedia])
 
-    let ua: UA | null = null
-    let stopped = false
-
-    void import("jssip").then((JsSIP) => {
-      if (stopped) return
-      ua = new JsSIP.UA({
-        sockets: [new JsSIP.WebSocketInterface(credentials.wsUri)],
-        uri: `sip:${credentials.sipUser}@${credentials.realm}`,
-        authorization_user: credentials.sipUser,
-        password: credentials.password,
-        register: true,
-        session_timers: false,
-        user_agent: "oneix-softphone",
-      })
-      ua.on("registered", () => report("registered"))
-      ua.on("registrationFailed", (event) =>
-        report("failed", `Couldn't connect your phone: ${event.cause ?? "registration failed"}`),
-      )
-      ua.on("disconnected", () => report("connecting"))
-      ua.on("newRTCSession", (event: RTCSessionEvent) => {
-        if (event.originator !== "remote") return
-        const session = event.session
-        if (busyRef.current) {
-          session.terminate({ status_code: 486, reason_phrase: "Busy Here" })
-          return
-        }
-        const callId = event.request.getHeader(VOICE_SIP_HEADERS.call) || null
-        const ticketNumber = Number(event.request.getHeader(VOICE_SIP_HEADERS.ticket)) || null
-        const caller = session.remote_identity.display_name || session.remote_identity.uri.user || "Caller"
-        sessionRef.current = session
-
-        session.on("peerconnection", ({ peerconnection }: { peerconnection: RTCPeerConnection }) => {
-          peerconnection.addEventListener("track", (track: RTCTrackEvent) => {
-            const audio = audioRef.current
-            if (audio && track.streams[0]) {
-              audio.srcObject = track.streams[0]
-              void audio.play().catch(() => undefined)
-            }
+  // The customer's side of setting up the call, relayed by oneix.
+  useEffect(() => {
+    if (!activeCallId) return
+    async function applySignal(signal: CallSignal) {
+      const connection = connectionRef.current
+      if (!connection) return
+      try {
+        if (signal.type === "answer") {
+          await connection.setRemoteDescription({
+            type: "answer",
+            sdp: signal.sdp,
           })
-        })
-        // Ends while ringing (another agent answered, or the caller hung up) or after the call.
-        const finished = () => {
-          if (sessionRef.current !== session) return
-          const callId = activeRef.current?.callId
-          if (callId) reportEnded(callId)
-          clearCall()
+          for (const candidate of pendingCandidates.current.splice(0))
+            await connection.addIceCandidate(candidate)
+        } else if (signal.type === "candidate" && signal.candidate) {
+          if (connection.remoteDescription)
+            await connection.addIceCandidate(signal.candidate)
+          else pendingCandidates.current.push(signal.candidate)
         }
-        session.on("failed", finished)
-        session.on("ended", finished)
-        setIncoming({ callId, ticketNumber, caller })
-      })
-      ua.start()
-    })
-
-    return () => {
-      stopped = true
-      sessionRef.current?.terminate()
-      ua?.stop()
-      clearCall()
+      } catch (error) {
+        console.warn("[softphone] couldn't apply the customer's signal", error)
+      }
     }
-  }, [enabled, credentials, clearCall, reportEnded])
+    const onEvent = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          type: string
+          callId?: string
+          signal?: CallSignal
+        }>
+      ).detail
+      if (
+        detail.type === "call.signal" &&
+        detail.callId === activeCallId &&
+        detail.signal
+      )
+        void applySignal(detail.signal)
+    }
+    window.addEventListener(VOICE_EVENT, onEvent)
+    return () => window.removeEventListener(VOICE_EVENT, onEvent)
+  }, [activeCallId])
+
+  // Hang up if the tab closes mid-call, so the customer isn't left waiting.
+  useEffect(() => {
+    if (!activeCallId) return
+    const leave = () => {
+      void fetch(`${API_URL}/voice/calls/${activeCallId}/end`, {
+        method: "POST",
+        credentials: "include",
+        keepalive: true,
+      })
+    }
+    window.addEventListener("pagehide", leave)
+    return () => window.removeEventListener("pagehide", leave)
+  }, [activeCallId])
 
   const accept = useCallback(() => {
-    const session = sessionRef.current
-    if (!session || !incoming) return
-    session.answer({ mediaConstraints: { audio: true, video: false } })
-    setActive({ ...incoming, answeredAt: Date.now(), muted: false })
-    setIncoming(null)
-    if (incoming.ticketNumber) router.push(`/tickets/${incoming.ticketNumber}`)
-    if (incoming.callId) {
-      answerCall.mutate(incoming.callId, {
-        onError: (error) => {
-          // Someone else got there first: let the call go.
-          if (error instanceof ApiError && error.status === 409) {
-            toast.error(error.message)
-            session.terminate()
-          }
-        },
+    if (!incoming?.callId) return
+    const call = incoming
+    const callId = incoming.callId
+    void (async () => {
+      let mic: MediaStream
+      try {
+        // The microphone first: without it there's no call to take.
+        mic = await navigator.mediaDevices.getUserMedia({ audio: true })
+      } catch {
+        toast.error("Allow the microphone to answer calls.")
+        return
+      }
+      try {
+        await answerCall.mutateAsync(callId)
+      } catch (error) {
+        mic.getTracks().forEach((track) => track.stop())
+        toast.error(
+          error instanceof ApiError
+            ? error.message
+            : "Couldn't answer the call."
+        )
+        setDeclined((current) => new Set(current).add(callId))
+        return
+      }
+
+      micRef.current = mic
+      setActive({ ...call, answeredAt: Date.now(), muted: false })
+      if (call.ticketNumber) router.push(`/tickets/${call.ticketNumber}`)
+
+      const connection = new RTCPeerConnection({ iceServers })
+      connectionRef.current = connection
+      for (const track of mic.getTracks()) connection.addTrack(track, mic)
+      const signal = (body: CallSignal) =>
+        api<void>(`/voice/calls/${callId}/signal`, {
+          method: "POST",
+          body,
+        }).catch((error: unknown) =>
+          console.warn("[softphone] couldn't send a signal", error)
+        )
+      connection.addEventListener("icecandidate", (event) => {
+        const c = event.candidate
+        void signal({
+          type: "candidate",
+          candidate: c
+            ? {
+                candidate: c.candidate,
+                sdpMid: c.sdpMid,
+                sdpMLineIndex: c.sdpMLineIndex,
+                usernameFragment: c.usernameFragment,
+              }
+            : null,
+        })
       })
-    }
-  }, [incoming, answerCall, router])
+      connection.addEventListener("track", (event) => {
+        const audio = audioRef.current
+        if (!audio || event.track.kind !== "audio") return
+        audio.srcObject = event.streams[0] ?? new MediaStream([event.track])
+        void audio.play().catch(() => undefined)
+      })
+      watchConnection(connection, audioRef)
+
+      // The customer's widget is waiting for this offer to switch the call over.
+      const offer = await connection.createOffer()
+      await connection.setLocalDescription(offer)
+      await signal({ type: "offer", sdp: offer.sdp ?? "" })
+    })()
+  }, [incoming, answerCall, router, iceServers])
 
   const decline = useCallback(() => {
-    sessionRef.current?.terminate({ status_code: 486, reason_phrase: "Busy Here" })
-    clearCall()
-  }, [clearCall])
+    const callId = incoming?.callId
+    if (callId) setDeclined((current) => new Set(current).add(callId))
+  }, [incoming])
 
-  const hangUp = useCallback(() => sessionRef.current?.terminate(), [])
+  const reportEnded = endCall.mutate
+  const hangUp = useCallback(() => {
+    if (activeCallId) reportEnded(activeCallId)
+    releaseMedia()
+    setActive(null)
+  }, [activeCallId, reportEnded, releaseMedia])
 
   const toggleMute = useCallback(() => {
-    const session = sessionRef.current
-    if (!session) return
-    const muted = session.isMuted().audio ?? false
-    if (muted) session.unmute({ audio: true })
-    else session.mute({ audio: true })
-    setActive((current) => (current ? { ...current, muted: !muted } : current))
+    const track = micRef.current?.getAudioTracks()[0]
+    if (!track) return
+    track.enabled = !track.enabled
+    setActive((current) =>
+      current ? { ...current, muted: !track.enabled } : current
+    )
   }, [])
 
   const value = useMemo<Softphone>(
-    () => ({ status, error, incoming, active, accept, decline, hangUp, toggleMute }),
-    [status, error, incoming, active, accept, decline, hangUp, toggleMute],
+    () => ({
+      status,
+      error: null,
+      incoming,
+      active,
+      accept,
+      decline,
+      hangUp,
+      toggleMute,
+    }),
+    [status, incoming, active, accept, decline, hangUp, toggleMute]
   )
 
   return (
     <SoftphoneContext.Provider value={value}>
       {children}
-      {/* The caller's voice. */}
+      {/* The customer's voice. */}
       <audio ref={audioRef} autoPlay className="hidden" />
     </SoftphoneContext.Provider>
   )
+}
+
+/** Reports a connection that can't carry audio, and in development logs how the audio flows. */
+function watchConnection(
+  connection: RTCPeerConnection,
+  audioRef: { current: HTMLAudioElement | null }
+) {
+  const dev = process.env.NODE_ENV !== "production"
+  const timer = dev
+    ? setInterval(() => void logAudioStats(connection, audioRef.current), 3000)
+    : undefined
+  connection.addEventListener("connectionstatechange", () => {
+    if (dev) console.debug("[softphone] connection", connection.connectionState)
+    if (connection.connectionState === "failed") {
+      toast.error(
+        "The call's audio couldn't connect. Your network may block it; ask an admin to set up a TURN server."
+      )
+    }
+    if (
+      connection.connectionState === "closed" ||
+      connection.connectionState === "failed"
+    )
+      clearInterval(timer)
+  })
+}
+
+/** Logs the call's audio flow, to tell a silent call's cause: nothing arriving, playback, or the mic. */
+async function logAudioStats(
+  connection: RTCPeerConnection,
+  audio: HTMLAudioElement | null
+): Promise<void> {
+  if (connection.connectionState === "closed") return
+  const stats = await connection.getStats()
+  const report: Record<string, unknown> = {
+    connection: connection.connectionState,
+  }
+  stats.forEach((stat: RTCStats & Record<string, unknown>) => {
+    if (stat.type === "inbound-rtp" && stat.kind === "audio")
+      report.in = { packets: stat.packetsReceived, level: stat.audioLevel }
+    if (stat.type === "outbound-rtp" && stat.kind === "audio")
+      report.out = { packets: stat.packetsSent }
+  })
+  const mic = connection
+    .getSenders()
+    .find((s) => s.track?.kind === "audio")?.track
+  report.micTrack = mic
+    ? { enabled: mic.enabled, state: mic.readyState }
+    : "none"
+  report.player = audio
+    ? { hasStream: audio.srcObject !== null, paused: audio.paused }
+    : "none"
+  console.debug("[softphone] audio", report)
 }

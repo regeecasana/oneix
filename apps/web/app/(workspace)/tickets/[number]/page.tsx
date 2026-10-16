@@ -14,7 +14,7 @@ import { StatusBadge } from "@/features/tickets/labels"
 import { useTicket } from "@/features/tickets/queries"
 import { Thread } from "@/features/tickets/thread"
 import { TicketProperties } from "@/features/tickets/ticket-properties"
-import { LiveCallBanner } from "@/features/voice/voice-ui"
+import { LiveCallBanner, useLiveTranscriptEntries } from "@/features/voice/voice-ui"
 
 /**
  * A ticket fills the screen: the conversation on the left with the composer docked under it, and
@@ -27,6 +27,8 @@ export default function TicketPage() {
   const me = useMe()
   // Accounts not linked to a Zendesk user can read but not act.
   const canAct = me.data?.permissions.linked ?? false
+  // The AI agent's side of a live call, as it happens.
+  const liveEntries = useLiveTranscriptEntries(Number(number))
 
   if (ticket.isPending || ticket.isError) {
     return (
@@ -67,7 +69,7 @@ export default function TicketPage() {
 
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
         <section className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1">
-          <Thread entries={data.thread} className="lg:min-h-0 lg:flex-1" />
+          <Thread entries={[...data.thread, ...liveEntries]} className="lg:min-h-0 lg:flex-1" />
           <div className="shrink-0 border-t bg-background px-4 py-3">
             {data.status === "closed" ? (
               <ComposerNotice icon={<Lock className="size-4" />}>
